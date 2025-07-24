@@ -1,4 +1,4 @@
-# scr/parser.nim
+# src/parser.nim
 import std/[os, strutils, streams, tables, options]
 import state 
 

@@ -1,4 +1,4 @@
-# scr/gui.nim
+# src/gui.nim
 import strutils
 import x11/[xlib, x]
 import state

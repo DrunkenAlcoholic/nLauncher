@@ -1,4 +1,4 @@
-# scr/state.nim
+# src/state.nim
 import x11/[xlib, x] 
 
 type

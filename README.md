@@ -2,7 +2,7 @@
 
 > A simple, fast, and highly configurable application launcher for Linux (X11) written in pure Nim. Inspired by Rofi, designed for personal use and customization.
 
-*(It would be a great idea to add a screenshot or a short GIF of the launcher in action here!)*
+![Nim Launcher with Dracula Colours](ScreenShot.png)
 
 ## Features
 
@@ -134,4 +134,4 @@ This project is functionally complete, but here are some ideas for future improv
 
 ## License
 
-This project is licensed under the MIT License. See the `LICENSE` file for details.
+This project is licensed under the GPL-3 License. See the `LICENSE` file for details.
