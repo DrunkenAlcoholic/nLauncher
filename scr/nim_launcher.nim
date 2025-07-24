@@ -8,18 +8,25 @@ import
   sequtils,
   algorithm,
   std/parsecfg,
+  json,
+  times,
   x11/xlib,
   x11/xutil,
   x11/x,
   x11/keysym
 
-# --- Data Structures (Unchanged) ---
+# --- Data Structures ---
 type
   DesktopApp = object
     name: string
     exec: string
     hasIcon: bool
   
+  CacheData = object
+    usrMtime: float
+    localMtime: float
+    apps: seq[DesktopApp]
+
   Config = object
     winWidth: int
     winMaxHeight: int
@@ -54,60 +61,74 @@ proc getBaseExec(exec: string): string = # (Unchanged)
   let cleanExec = exec.split('%')[0].strip()
   return cleanExec.split(' ')[0].extractFilename()
 
-# --- THIS IS THE NEW, PROVEN PARSING LOGIC FROM OUR TESTER ---
-proc getBestValue(entries: Table[string, string], baseKey: string): string =
-  if entries.hasKey(baseKey): return entries[baseKey]
-  if entries.hasKey(baseKey & "[en_US]"): return entries[baseKey & "[en_US]"]
-  if entries.hasKey(baseKey & "[en]"): return entries[baseKey & "[en]"]
-  for key, val in entries:
-    if key.startsWith(baseKey & "["):
-      return val
-  return ""
-
-proc parseDesktopFile(path: string): Option[DesktopApp] =
+proc parseDesktopFile(path: string): Option[DesktopApp] = # (Unchanged)
   let stream = newFileStream(path, fmRead)
   if stream == nil: return none(DesktopApp)
   defer: stream.close()
-
   var inDesktopEntrySection = false
   var entries = initTable[string, string]()
-
   for line in stream.lines:
     let strippedLine = line.strip()
     if strippedLine.len == 0 or strippedLine.startsWith("#"): continue
-
     if strippedLine.startsWith("[") and strippedLine.endsWith("]"):
       inDesktopEntrySection = (strippedLine == "[Desktop Entry]")
       continue
-
     if inDesktopEntrySection and "=" in strippedLine:
       let parts = strippedLine.split('=', 1)
       if parts.len == 2:
         entries[parts[0].strip()] = parts[1].strip()
-  
-  let name = getBestValue(entries, "Name")
-  let exec = getBestValue(entries, "Exec")
-
+  proc getBestValue(baseKey: string): string =
+    if entries.hasKey(baseKey): return entries[baseKey]
+    if entries.hasKey(baseKey & "[en_US]"): return entries[baseKey & "[en_US]"]
+    if entries.hasKey(baseKey & "[en]"): return entries[baseKey & "[en]"]
+    for key, val in entries:
+      if key.startsWith(baseKey & "["): return val
+    return ""
+  let name = getBestValue("Name")
+  let exec = getBestValue("Exec")
   let categories = entries.getOrDefault("Categories", "")
   let icon = entries.getOrDefault("Icon", "")
   let noDisplay = entries.getOrDefault("NoDisplay", "false").toLower == "true"
   let isTerminalApp = entries.getOrDefault("Terminal", "false").toLower == "true"
   let hasIcon = icon.len > 0
-  
-  if noDisplay or isTerminalApp or name.len == 0 or exec.len == 0:
-    return none(DesktopApp)
-  
-  if categories.contains("Settings") or categories.contains("System"):
-    return none(DesktopApp)
-
+  if noDisplay or isTerminalApp or name.len == 0 or exec.len == 0: return none(DesktopApp)
+  if categories.contains("Settings") or categories.contains("System"): return none(DesktopApp)
   return some(DesktopApp(name: name, exec: exec, hasIcon: hasIcon))
 
-# --- The rest of the file is completely unchanged ---
+# --- THIS IS THE PROCEDURE WITH THE FIX ---
 proc loadApplications() =
-  echo "Searching for applications..."
-  var apps = initTable[string, DesktopApp]()
   let homeDir = getHomeDir()
-  let searchPaths = [homeDir / ".local/share/applications", "/usr/share/applications"]
+  let usrAppDir = "/usr/share/applications"
+  let localAppDir = homeDir / ".local/share/applications"
+  let cacheDir = homeDir / ".cache" / "nim_launcher"
+  let cacheFile = cacheDir / "apps.json"
+
+  var currentUsrMtime = 0.0
+  if dirExists(usrAppDir):
+    currentUsrMtime = getLastModificationTime(usrAppDir).toUnixFloat()
+  var currentLocalMtime = 0.0
+  if dirExists(localAppDir):
+    currentLocalMtime = getLastModificationTime(localAppDir).toUnixFloat()
+
+  if fileExists(cacheFile):
+    try:
+      let content = readFile(cacheFile)
+      # --- THE FIX IS HERE ---
+      let cache = to(parseJson(content), CacheData)
+      
+      if cache.usrMtime == currentUsrMtime and cache.localMtime == currentLocalMtime:
+        allApps = cache.apps
+        filteredApps = allApps
+        echo "Loaded ", allApps.len, " applications from cache."
+        return
+    except JsonParsingError:
+      echo "Cache file corrupted (malformed JSON), re-scanning..."
+    except ValueError:
+      echo "Cache file corrupted (invalid data), re-scanning..."
+  
+  echo "Cache invalid or missing, scanning for applications..."
+  var apps = initTable[string, DesktopApp]()
+  let searchPaths = [localAppDir, usrAppDir]
   for basePath in searchPaths:
     if not dirExists(basePath): continue
     for path in walkFiles(basePath / "*.desktop"):
@@ -119,20 +140,27 @@ proc loadApplications() =
           apps[baseExec] = newApp
         else:
           let existingApp = apps[baseExec]
-          var newIsBetter: bool
-          if newApp.hasIcon and not existingApp.hasIcon: newIsBetter = true
-          elif not newApp.hasIcon and existingApp.hasIcon: newIsBetter = false
-          else:
-            let newHasFlag = newApp.exec.contains("--")
-            let existingHasFlag = existingApp.exec.contains("--")
-            if existingHasFlag and not newHasFlag: newIsBetter = true
-            elif newHasFlag and not existingHasFlag: newIsBetter = false
-            else: newIsBetter = newApp.exec.split(' ').len < existingApp.exec.split(' ').len
-          if newIsBetter: apps[baseExec] = newApp
+          if newApp.hasIcon and not existingApp.hasIcon:
+            apps[baseExec] = newApp
+  
   allApps = toSeq(apps.values).sortedByIt(it.name)
   filteredApps = allApps
   echo "Found ", allApps.len, " unique applications."
 
+  let newCache = CacheData(
+    usrMtime: currentUsrMtime,
+    localMtime: currentLocalMtime,
+    apps: allApps
+  )
+  try:
+    createDir(cacheDir)
+    writeFile(cacheFile, pretty(%newCache))
+    echo "Saved new application list to cache."
+  except:
+    echo "Warning: Could not write to cache file at ", cacheFile
+
+# --- The rest of the file is completely unchanged ---
+# ... (initLauncherConfig, fuzzyMatch, all GUI code, etc. is the same) ...
 proc initLauncherConfig() =
   # 1. Set hardcoded defaults first
   config.winWidth = 600
