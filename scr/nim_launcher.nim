@@ -13,7 +13,7 @@ import
   x11/x,
   x11/keysym
 
-# --- Data Structures ---
+# --- Data Structures (Unchanged) ---
 type
   DesktopApp = object
     name: string
@@ -28,16 +28,12 @@ type
     centerWindow: bool
     positionX, positionY: int
     verticalAlign: string
-    # Colors as hex strings
     bgColorHex, fgColorHex: string
     highlightBgColorHex, highlightFgColorHex: string
     borderColorHex: string
-    # Input settings
     prompt: string
     cursor: string
-    # Border
     borderWidth: int
-    # Populated at runtime
     bgColor, fgColor, highlightBgColor, highlightFgColor, borderColor: culong
 
 # --- Global State Variables (Unchanged) ---
@@ -53,32 +49,48 @@ var
   viewOffset = 0
   shouldExit = false
 
-# --- Data Sourcing Logic (Unchanged) ---
-# ... (getBaseExec and parseDesktopFile are the same) ...
-proc getBaseExec(exec: string): string =
+# --- Data Sourcing Logic ---
+proc getBaseExec(exec: string): string = # (Unchanged)
   let cleanExec = exec.split('%')[0].strip()
   return cleanExec.split(' ')[0].extractFilename()
 
+# --- THIS IS THE REVERTED, WORKING PARSER ---
 proc parseDesktopFile(path: string): Option[DesktopApp] =
-  try:
-    let cfg = parsecfg.loadConfig(path)
-    let name = cfg.getSectionValue("Desktop Entry", "Name", "")
-    let exec = cfg.getSectionValue("Desktop Entry", "Exec", "")
-    let categories = cfg.getSectionValue("Desktop Entry", "Categories", "")
-    let icon = cfg.getSectionValue("Desktop Entry", "Icon", "")
-    let noDisplayStr = cfg.getSectionValue("Desktop Entry", "NoDisplay", "false")
-    let terminalStr = cfg.getSectionValue("Desktop Entry", "Terminal", "false")
-    let noDisplay = (noDisplayStr.toLower == "true")
-    let isTerminalApp = (terminalStr.toLower == "true")
-    let hasIcon = (icon.len > 0)
-    if noDisplay or isTerminalApp or name.len == 0 or exec.len == 0:
-      return none(DesktopApp)
-    if categories.contains("Settings") or categories.contains("System"):
-      return none(DesktopApp)
-    return some(DesktopApp(name: name, exec: exec, hasIcon: hasIcon))
-  except ValueError, IOError:
-    return none(DesktopApp)
+  var name, exec, categories: string
+  var noDisplay, isTerminalApp, hasIcon, inDesktopEntrySection: bool
+  let stream = newFileStream(path, fmRead)
+  if stream == nil: return none(DesktopApp)
+  defer: stream.close()
 
+  for line in stream.lines:
+    let strippedLine = line.strip()
+    if strippedLine == "[Desktop Entry]":
+      inDesktopEntrySection = true
+      continue
+    if not inDesktopEntrySection or strippedLine.startsWith("#") or strippedLine.len == 0:
+      continue
+    if "=" in strippedLine:
+      let parts = strippedLine.split('=', 1)
+      let key = parts[0].strip()
+      let value = parts[1].strip()
+      case key
+      of "Name": name = value
+      of "Exec": exec = value
+      of "Categories": categories = value
+      of "Icon":
+        if value.len > 0: hasIcon = true
+      of "NoDisplay":
+        if value.toLower == "true": noDisplay = true
+      of "Terminal":
+        if value.toLower == "true": isTerminalApp = true
+      else: discard
+      
+  if noDisplay or isTerminalApp or name.len == 0 or exec.len == 0: return none(DesktopApp)
+  if categories.contains("Settings") or categories.contains("System"): return none(DesktopApp)
+  
+  return some(DesktopApp(name: name, exec: exec, hasIcon: hasIcon))
+
+# --- The rest of the file is unchanged and known to be working ---
 proc loadApplications() =
   echo "Searching for applications..."
   var apps = initTable[string, DesktopApp]()
@@ -109,9 +121,26 @@ proc loadApplications() =
   filteredApps = allApps
   echo "Found ", allApps.len, " unique applications."
 
-# --- THIS IS THE NEW, REWRITTEN CONFIGURATION PROCEDURE ---
-proc createDefaultConfig(path: string) =
-  let content = """
+proc initLauncherConfig() =
+  config.winWidth = 600
+  config.lineHeight = 22
+  config.maxVisibleItems = 15
+  config.centerWindow = true
+  config.positionX = 500
+  config.positionY = 50
+  config.verticalAlign = "one-third"
+  config.bgColorHex = "#2E3440"
+  config.fgColorHex = "#D8DEE9"
+  config.highlightBgColorHex = "#88C0D0"
+  config.highlightFgColorHex = "#2E3440"
+  config.borderColorHex = "#4C566A"
+  config.borderWidth = 2
+  config.prompt = "> "
+  config.cursor = "_"
+
+  let configPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
+  if not fileExists(configPath):
+    let content = """
 [window]
 width = 600
 max_visible_items = 15
@@ -134,39 +163,15 @@ width = 2
 prompt = "> "
 cursor = "_"
 """
-  try:
-    createDir(path.parentDir)
-    writeFile(path, content)
-    echo "Created default config at: ", path
-  except:
-    echo "Warning: Could not write default config file at ", path
-
-proc initLauncherConfig() =
-  # 1. Set hardcoded defaults first
-  config.winWidth = 600
-  config.lineHeight = 22
-  config.maxVisibleItems = 15
-  config.centerWindow = true
-  config.positionX = 500
-  config.positionY = 50
-  config.verticalAlign = "one-third"
-  config.bgColorHex = "#2E3440"
-  config.fgColorHex = "#D8DEE9"
-  config.highlightBgColorHex = "#88C0D0"
-  config.highlightFgColorHex = "#2E3440"
-  config.borderColorHex = "#4C566A"
-  config.borderWidth = 2
-  config.prompt = "> "
-  config.cursor = "_"
-
-  # 2. Check for and load the real config file
-  let configPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
-  if not fileExists(configPath):
-    createDefaultConfig(configPath)
+    try:
+      createDir(configPath.parentDir)
+      writeFile(configPath, content)
+      echo "Created default config at: ", configPath
+    except:
+      echo "Warning: Could not write default config file at ", configPath
 
   if fileExists(configPath):
-    let cfg = parsecfg.loadConfig(configPath)
-    # Helper to safely parse an int from the config
+    let cfg = loadConfig(configPath)
     proc parseInt(section, key: string, default: int): int =
       let valStr = cfg.getSectionValue(section, key, $default)
       try:
@@ -174,29 +179,24 @@ proc initLauncherConfig() =
       except ValueError:
         return default
 
-    # 3. Overwrite defaults with values from the file
     config.winWidth = parseInt("window", "width", config.winWidth)
     config.maxVisibleItems = parseInt("window", "max_visible_items", config.maxVisibleItems)
     config.centerWindow = cfg.getSectionValue("window", "center", $config.centerWindow).toLower == "true"
     config.positionX = parseInt("window", "position_x", config.positionX)
     config.positionY = parseInt("window", "position_y", config.positionY)
     config.verticalAlign = cfg.getSectionValue("window", "vertical_align", config.verticalAlign)
-    
     config.bgColorHex = cfg.getSectionValue("colors", "background", config.bgColorHex)
     config.fgColorHex = cfg.getSectionValue("colors", "foreground", config.fgColorHex)
     config.highlightBgColorHex = cfg.getSectionValue("colors", "highlight_background", config.highlightBgColorHex)
     config.highlightFgColorHex = cfg.getSectionValue("colors", "highlight_foreground", config.highlightFgColorHex)
     config.borderColorHex = cfg.getSectionValue("colors", "border_color", config.borderColorHex)
-
     config.borderWidth = parseInt("border", "width", config.borderWidth)
     config.prompt = cfg.getSectionValue("input", "prompt", config.prompt)
     config.cursor = cfg.getSectionValue("input", "cursor", config.cursor)
 
-  # 4. Calculate final height
   let inputHeight = 40
   config.winMaxHeight = inputHeight + (config.maxVisibleItems * config.lineHeight)
 
-# ... (fuzzyMatch, updateFilteredApps, launchSelectedApp, parseColor are unchanged) ...
 proc fuzzyMatch(query: string, target: string): bool =
   if query.len == 0: return true
   var queryIndex = 0
@@ -205,10 +205,12 @@ proc fuzzyMatch(query: string, target: string): bool =
       queryIndex += 1
       if queryIndex == query.len: return true
   return false
+
 proc updateFilteredApps() =
   filteredApps = allApps.filter(proc (app: DesktopApp): bool = fuzzyMatch(inputText, app.name))
   selectedIndex = 0
   viewOffset = 0
+
 proc launchSelectedApp() =
   if selectedIndex >= 0 and selectedIndex < filteredApps.len:
     let app = filteredApps[selectedIndex]
@@ -219,6 +221,7 @@ proc launchSelectedApp() =
       shouldExit = true
     except:
       echo "Error launching application via shell: ", cleanExec
+
 proc parseColor(hex: string): culong =
   var r, g, b: int
   if hex.startsWith("#") and hex.len == 7:
@@ -241,7 +244,7 @@ proc parseColor(hex: string): culong =
     echo "Warning: Failed to allocate color: ", hex
     return 0
   return color.pixel
-# --- GUI Drawing and Handling ---
+
 proc initGui() =
   display = XOpenDisplay(nil)
   if display == nil: quit "Failed to open display"
@@ -293,7 +296,6 @@ proc drawText(text: string, x, y: int, isSelected: bool) =
 proc redrawWindow() =
   discard XClearWindow(display, window)
   
-  # NEW: Draw the border first
   if config.borderWidth > 0:
     discard XSetForeground(display, graphicsContext, config.borderColor)
     for i in 0 ..< config.borderWidth:
@@ -317,7 +319,6 @@ proc redrawWindow() =
     drawText(app.name, 20, yPos, isSelected = isSelected)
   discard XFlush(display)
 
-# ... (handleKeyPress and main are unchanged) ...
 proc handleKeyPress(event: var XEvent) =
   var buffer: array[40, char]
   var keysym: KeySym
@@ -343,6 +344,7 @@ proc handleKeyPress(event: var XEvent) =
     if buffer[0] != '\0' and buffer[0] >= ' ':
       inputText.add(buffer[0])
       updateFilteredApps()
+
 proc main() =
   initLauncherConfig()
   loadApplications()
