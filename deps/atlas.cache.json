@@ -6,7 +6,7 @@
     "versions": [
       [
         {
-          "vtag": "#head@a9e7a5ed2320d6d458399e025a36216b102c307a",
+          "vtag": "#head@7368fb9de64fd19322832cbd666458549094780e",
           "vid": 0
         },
         {
@@ -27,7 +27,7 @@
       ]
     ],
     "activeVersion": {
-      "vtag": "#head@a9e7a5ed2320d6d458399e025a36216b102c307a",
+      "vtag": "#head@7368fb9de64fd19322832cbd666458549094780e",
       "vid": 0
     },
     "module": "",
@@ -38,8 +38,8 @@
     "isRoot": true,
     "errors": [],
     "originHead": {
-      "h": "",
-      "orig": "FromNone"
+      "h": "7368fb9de64fd19322832cbd666458549094780e",
+      "orig": "FromGitTag"
     }
   },
   "pkgs": {
@@ -49,7 +49,7 @@
       "versions": [
         [
           {
-            "vtag": "#head@a9e7a5ed2320d6d458399e025a36216b102c307a",
+            "vtag": "#head@7368fb9de64fd19322832cbd666458549094780e",
             "vid": 0
           },
           {
@@ -70,7 +70,7 @@
         ]
       ],
       "activeVersion": {
-        "vtag": "#head@a9e7a5ed2320d6d458399e025a36216b102c307a",
+        "vtag": "#head@7368fb9de64fd19322832cbd666458549094780e",
         "vid": 0
       },
       "module": "",
@@ -81,8 +81,8 @@
       "isRoot": true,
       "errors": [],
       "originHead": {
-        "h": "",
-        "orig": "FromNone"
+        "h": "7368fb9de64fd19322832cbd666458549094780e",
+        "orig": "FromGitTag"
       }
     },
     "https://github.com/nim-lang/x11": {

@@ -7,12 +7,13 @@ import
   tables,
   sequtils,
   algorithm,
+  # std/parsecfg has been removed
   x11/xlib,
   x11/xutil,
   x11/x,
   x11/keysym
 
-# --- Data Structures ---
+# --- Data Structures (Unchanged) ---
 type
   DesktopApp = object
     name: string
@@ -30,7 +31,7 @@ type
     highlightBgColorHex, highlightFgColorHex: string
     bgColor, fgColor, highlightBgColor, highlightFgColor: culong
 
-# --- Global State Variables ---
+# --- Global State Variables (Unchanged) ---
 var
   display: PDisplay
   window: Window
@@ -54,6 +55,7 @@ proc parseDesktopFile(path: string): Option[DesktopApp] =
   let stream = newFileStream(path, fmRead)
   if stream == nil: return none(DesktopApp)
   defer: stream.close()
+
   for line in stream.lines:
     let strippedLine = line.strip()
     if strippedLine == "[Desktop Entry]":
@@ -76,8 +78,10 @@ proc parseDesktopFile(path: string): Option[DesktopApp] =
       of "Terminal":
         if value.toLower == "true": isTerminalApp = true
       else: discard
+      
   if noDisplay or isTerminalApp or name.len == 0 or exec.len == 0: return none(DesktopApp)
   if categories.contains("Settings") or categories.contains("System"): return none(DesktopApp)
+  
   return some(DesktopApp(name: name, exec: exec, hasIcon: hasIcon))
 
 proc loadApplications() =
@@ -110,8 +114,7 @@ proc loadApplications() =
   filteredApps = allApps
   echo "Found ", allApps.len, " unique applications."
 
-# --- Config and Core Logic ---
-proc loadConfig() =
+proc initLauncherConfig() =
   config.winWidth = 600
   config.lineHeight = 22
   config.maxVisibleItems = 15
@@ -150,7 +153,6 @@ proc launchSelectedApp() =
     except:
       echo "Error launching application via shell: ", cleanExec
 
-# --- GUI Drawing and Handling ---
 proc parseColor(hex: string): culong =
   var r, g, b: int
   if hex.startsWith("#") and hex.len == 7:
@@ -168,13 +170,13 @@ proc parseColor(hex: string): culong =
   color.red = uint16(r * 257)
   color.green = uint16(g * 257)
   color.blue = uint16(b * 257)
-  # --- THE FIX IS HERE ---
   color.flags = cast[cchar](DoRed or DoGreen or DoBlue)
   if XAllocColor(display, XDefaultColormap(display, screen), color.addr) == 0:
     echo "Warning: Failed to allocate color: ", hex
     return 0
   return color.pixel
 
+# --- THIS PROCEDURE IS MODIFIED ---
 proc initGui() =
   display = XOpenDisplay(nil)
   if display == nil: quit "Failed to open display"
@@ -198,7 +200,8 @@ proc initGui() =
   var attributes: XSetWindowAttributes
   attributes.override_redirect = true.XBool
   attributes.background_pixel = config.bgColor
-  attributes.event_mask = KeyPressMask or ExposureMask
+  # Add FocusChangeMask to the event mask
+  attributes.event_mask = KeyPressMask or ExposureMask or FocusChangeMask
   let valuemask: culong = CWOverrideRedirect or CWBackPixel or CWEventMask
   
   window = XCreateWindow(display, XRootWindow(display, screen), finalX, finalY,
@@ -263,19 +266,27 @@ proc handleKeyPress(event: var XEvent) =
       inputText.add(buffer[0])
       updateFilteredApps()
 
+# --- THIS PROCEDURE IS MODIFIED ---
 proc main() =
-  loadConfig()
+  initLauncherConfig()
   loadApplications()
   initGui()
+  
   while not shouldExit:
     var event: XEvent
     discard XNextEvent(display, event.addr)
+    
     case event.theType
     of Expose: redrawWindow()
     of KeyPress:
       handleKeyPress(event)
-      redrawWindow()
+      if not shouldExit: # Small polish: don't redraw if we're about to exit
+        redrawWindow()
+    of FocusOut: # If our window loses focus, close it.
+      echo "Focus lost. Closing."
+      shouldExit = true
     else: discard
+  
   discard XDestroyWindow(display, window)
   discard XCloseDisplay(display)
 
