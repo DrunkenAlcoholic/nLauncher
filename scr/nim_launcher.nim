@@ -54,43 +54,55 @@ proc getBaseExec(exec: string): string = # (Unchanged)
   let cleanExec = exec.split('%')[0].strip()
   return cleanExec.split(' ')[0].extractFilename()
 
-# --- THIS IS THE REVERTED, WORKING PARSER ---
+# --- THIS IS THE NEW, PROVEN PARSING LOGIC FROM OUR TESTER ---
+proc getBestValue(entries: Table[string, string], baseKey: string): string =
+  if entries.hasKey(baseKey): return entries[baseKey]
+  if entries.hasKey(baseKey & "[en_US]"): return entries[baseKey & "[en_US]"]
+  if entries.hasKey(baseKey & "[en]"): return entries[baseKey & "[en]"]
+  for key, val in entries:
+    if key.startsWith(baseKey & "["):
+      return val
+  return ""
+
 proc parseDesktopFile(path: string): Option[DesktopApp] =
-  var name, exec, categories: string
-  var noDisplay, isTerminalApp, hasIcon, inDesktopEntrySection: bool
   let stream = newFileStream(path, fmRead)
   if stream == nil: return none(DesktopApp)
   defer: stream.close()
 
+  var inDesktopEntrySection = false
+  var entries = initTable[string, string]()
+
   for line in stream.lines:
     let strippedLine = line.strip()
-    if strippedLine == "[Desktop Entry]":
-      inDesktopEntrySection = true
+    if strippedLine.len == 0 or strippedLine.startsWith("#"): continue
+
+    if strippedLine.startsWith("[") and strippedLine.endsWith("]"):
+      inDesktopEntrySection = (strippedLine == "[Desktop Entry]")
       continue
-    if not inDesktopEntrySection or strippedLine.startsWith("#") or strippedLine.len == 0:
-      continue
-    if "=" in strippedLine:
+
+    if inDesktopEntrySection and "=" in strippedLine:
       let parts = strippedLine.split('=', 1)
-      let key = parts[0].strip()
-      let value = parts[1].strip()
-      case key
-      of "Name": name = value
-      of "Exec": exec = value
-      of "Categories": categories = value
-      of "Icon":
-        if value.len > 0: hasIcon = true
-      of "NoDisplay":
-        if value.toLower == "true": noDisplay = true
-      of "Terminal":
-        if value.toLower == "true": isTerminalApp = true
-      else: discard
-      
-  if noDisplay or isTerminalApp or name.len == 0 or exec.len == 0: return none(DesktopApp)
-  if categories.contains("Settings") or categories.contains("System"): return none(DesktopApp)
+      if parts.len == 2:
+        entries[parts[0].strip()] = parts[1].strip()
   
+  let name = getBestValue(entries, "Name")
+  let exec = getBestValue(entries, "Exec")
+
+  let categories = entries.getOrDefault("Categories", "")
+  let icon = entries.getOrDefault("Icon", "")
+  let noDisplay = entries.getOrDefault("NoDisplay", "false").toLower == "true"
+  let isTerminalApp = entries.getOrDefault("Terminal", "false").toLower == "true"
+  let hasIcon = icon.len > 0
+  
+  if noDisplay or isTerminalApp or name.len == 0 or exec.len == 0:
+    return none(DesktopApp)
+  
+  if categories.contains("Settings") or categories.contains("System"):
+    return none(DesktopApp)
+
   return some(DesktopApp(name: name, exec: exec, hasIcon: hasIcon))
 
-# --- The rest of the file is unchanged and known to be working ---
+# --- The rest of the file is completely unchanged ---
 proc loadApplications() =
   echo "Searching for applications..."
   var apps = initTable[string, DesktopApp]()
@@ -122,6 +134,7 @@ proc loadApplications() =
   echo "Found ", allApps.len, " unique applications."
 
 proc initLauncherConfig() =
+  # 1. Set hardcoded defaults first
   config.winWidth = 600
   config.lineHeight = 22
   config.maxVisibleItems = 15
@@ -138,6 +151,7 @@ proc initLauncherConfig() =
   config.prompt = "> "
   config.cursor = "_"
 
+  # 2. Check for and load the real config file
   let configPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
   if not fileExists(configPath):
     let content = """
@@ -194,6 +208,7 @@ cursor = "_"
     config.prompt = cfg.getSectionValue("input", "prompt", config.prompt)
     config.cursor = cfg.getSectionValue("input", "cursor", config.cursor)
 
+  # 4. Calculate final height
   let inputHeight = 40
   config.winMaxHeight = inputHeight + (config.maxVisibleItems * config.lineHeight)
 
