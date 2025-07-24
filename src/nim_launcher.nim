@@ -3,11 +3,13 @@
 # The main entry point for the application.
 # modules to initialize the launcher, load data, and run the main event loop.
 
-import std/[os, osproc, strutils, options, tables, sequtils, algorithm, parsecfg, json, times]
+import
+  std/
+    [os, osproc, strutils, options, tables, sequtils, algorithm, parsecfg, json, times]
 import x11/[xlib, xutil, x, keysym]
 
 # Import our custom modules
-import state, parser, gui
+import state, parser, gui, themes
 
 # --- Data Loading and Caching ---
 
@@ -32,7 +34,7 @@ proc loadApplications() =
     try:
       let content = readFile(cacheFile)
       let cache = to(parseJson(content), CacheData)
-      
+
       # Validate the cache by comparing directory modification times.
       if cache.usrMtime == currentUsrMtime and cache.localMtime == currentLocalMtime:
         allApps = cache.apps
@@ -43,13 +45,14 @@ proc loadApplications() =
       echo "Cache file corrupted (malformed JSON), re-scanning..."
     except ValueError:
       echo "Cache file corrupted (invalid data), re-scanning..."
-  
+
   # 3. If cache is invalid, perform a full scan using our parser module.
   echo "Cache invalid or missing, scanning for applications..."
   var apps = initTable[string, DesktopApp]()
   let searchPaths = [localAppDir, usrAppDir]
   for basePath in searchPaths:
-    if not dirExists(basePath): continue
+    if not dirExists(basePath):
+      continue
     for path in walkFiles(basePath / "*.desktop"):
       let appOpt = parseDesktopFile(path)
       if appOpt.isSome:
@@ -63,17 +66,14 @@ proc loadApplications() =
           let existingApp = apps[baseExec]
           if newApp.hasIcon and not existingApp.hasIcon:
             apps[baseExec] = newApp
-  
+
   allApps = toSeq(apps.values).sortedByIt(it.name)
   filteredApps = allApps
   echo "Found ", allApps.len, " unique applications."
 
   # 4. Write the new application list back to the cache for future runs.
-  let newCache = CacheData(
-    usrMtime: currentUsrMtime,
-    localMtime: currentLocalMtime,
-    apps: allApps
-  )
+  let newCache =
+    CacheData(usrMtime: currentUsrMtime, localMtime: currentLocalMtime, apps: allApps)
   try:
     createDir(cacheDir)
     writeFile(cacheFile, pretty(%newCache))
@@ -85,7 +85,7 @@ proc loadApplications() =
 
 proc initLauncherConfig() =
   ## Loads settings from the config file, creating a default one if it doesn't exist.
-  
+
   # 1. Set hardcoded defaults first. These will be used if the config file
   #    is missing or if a specific key is not present.
   config.winWidth = 600
@@ -103,11 +103,13 @@ proc initLauncherConfig() =
   config.borderWidth = 2
   config.prompt = "> "
   config.cursor = "_"
+  var themeName = "Nord"
 
   # 2. Define config path and create a default file if necessary.
   let configPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
   if not fileExists(configPath):
-    let content = """
+    let content =
+      """
 [window]
 width = 600
 max_visible_items = 15
@@ -129,6 +131,24 @@ width = 2
 [input]
 prompt = "> "
 cursor = "_"
+
+[theme]
+name: "Nord",
+#name: "Solarized Dark"
+#name: "Solarized Light"
+#name: "Gruvbox Dark"
+#name: "Gruvbox Light"
+#name: "Dracula"
+#name: "Monokai"
+#name: "One Dark"
+#name: "Material Dark"
+#name: "Material Light"
+#name: "Cobalt"
+#name: "Ayu Dark"
+#name: "Ayu Light"
+#name: "Catppuccin Mocha"
+#name: "Catppuccin Latte"
+#name: "Catppuccin Frappé"
 """
     try:
       createDir(configPath.parentDir)
@@ -142,23 +162,42 @@ cursor = "_"
     let cfg = loadConfig(configPath)
     proc parseInt(section, key: string, default: int): int =
       let valStr = cfg.getSectionValue(section, key, $default)
-      try: return parseInt(valStr)
-      except ValueError: return default
+      try:
+        return parseInt(valStr)
+      except ValueError:
+        return default
 
     config.winWidth = parseInt("window", "width", config.winWidth)
-    config.maxVisibleItems = parseInt("window", "max_visible_items", config.maxVisibleItems)
-    config.centerWindow = cfg.getSectionValue("window", "center", $config.centerWindow).toLower == "true"
+    config.maxVisibleItems =
+      parseInt("window", "max_visible_items", config.maxVisibleItems)
+    config.centerWindow =
+      cfg.getSectionValue("window", "center", $config.centerWindow).toLower == "true"
     config.positionX = parseInt("window", "position_x", config.positionX)
     config.positionY = parseInt("window", "position_y", config.positionY)
-    config.verticalAlign = cfg.getSectionValue("window", "vertical_align", config.verticalAlign)
+    config.verticalAlign =
+      cfg.getSectionValue("window", "vertical_align", config.verticalAlign)
     config.bgColorHex = cfg.getSectionValue("colors", "background", config.bgColorHex)
     config.fgColorHex = cfg.getSectionValue("colors", "foreground", config.fgColorHex)
-    config.highlightBgColorHex = cfg.getSectionValue("colors", "highlight_background", config.highlightBgColorHex)
-    config.highlightFgColorHex = cfg.getSectionValue("colors", "highlight_foreground", config.highlightFgColorHex)
-    config.borderColorHex = cfg.getSectionValue("colors", "border_color", config.borderColorHex)
+    config.highlightBgColorHex =
+      cfg.getSectionValue("colors", "highlight_background", config.highlightBgColorHex)
+    config.highlightFgColorHex =
+      cfg.getSectionValue("colors", "highlight_foreground", config.highlightFgColorHex)
+    config.borderColorHex =
+      cfg.getSectionValue("colors", "border_color", config.borderColorHex)
     config.borderWidth = parseInt("border", "width", config.borderWidth)
     config.prompt = cfg.getSectionValue("input", "prompt", config.prompt)
     config.cursor = cfg.getSectionValue("input", "cursor", config.cursor)
+    themeName = cfg.getSectionValue("theme", "name", themeName)
+
+  # --- Theme selection logic ---
+  for theme in arrthemes:
+    if theme.name.toLower == themeName.toLower:
+      config.bgColorHex = theme.bgColorHex
+      config.fgColorHex = theme.fgColorHex
+      config.highlightBgColorHex = theme.highlightBgColorHex
+      config.highlightFgColorHex = theme.highlightFgColorHex
+      config.borderColorHex = theme.borderColorHex
+      break
 
   # 4. Calculate the final window height based on the loaded (or default) settings.
   let inputHeight = 40
@@ -169,17 +208,22 @@ cursor = "_"
 proc fuzzyMatch(query: string, target: string): bool =
   ## Performs a simple, case-insensitive fuzzy match.
   ## Returns true if all characters in `query` appear in `target` in the same order.
-  if query.len == 0: return true
+  if query.len == 0:
+    return true
   var queryIndex = 0
   for char in target.toLower:
     if queryIndex < query.len and query.toLower[queryIndex] == char:
       queryIndex += 1
-      if queryIndex == query.len: return true
+      if queryIndex == query.len:
+        return true
   return false
 
 proc updateFilteredApps() =
   ## Updates the `filteredApps` list based on the current `inputText`.
-  filteredApps = allApps.filter(proc (app: DesktopApp): bool = fuzzyMatch(inputText, app.name))
+  filteredApps = allApps.filter(
+    proc(app: DesktopApp): bool =
+      fuzzyMatch(inputText, app.name)
+  )
   selectedIndex = 0
   viewOffset = 0 # Reset scroll on new search
 
@@ -199,8 +243,10 @@ proc handleKeyPress(event: var XEvent) =
   ## Processes a key press event from the X server.
   var buffer: array[40, char]
   var keysym: KeySym
-  discard XLookupString(event.xkey.addr, cast[cstring](buffer[0].addr), cint(buffer.len), keysym.addr, nil)
-  
+  discard XLookupString(
+    event.xkey.addr, cast[cstring](buffer[0].addr), cint(buffer.len), keysym.addr, nil
+  )
+
   case keysym
   of XK_Escape:
     shouldExit = true
@@ -232,21 +278,21 @@ proc handleKeyPress(event: var XEvent) =
 
 proc main() =
   ## The main entry point of the program.
-  
+
   # 1. Load settings from the config file (or create one).
   initLauncherConfig()
-  
+
   # 2. Load the application list (from cache or by scanning).
   loadApplications()
-  
+
   # 3. Create and display the GUI window.
   initGui()
-  
+
   # 4. Run the main event loop.
   while not shouldExit:
     var event: XEvent
     discard XNextEvent(display, event.addr)
-    
+
     case event.theType
     of Expose:
       redrawWindow()
@@ -258,8 +304,9 @@ proc main() =
       # If the window loses focus, exit gracefully.
       echo "Focus lost. Closing."
       shouldExit = true
-    else: discard
-  
+    else:
+      discard
+
   # 5. Clean up X11 resources before exiting.
   discard XDestroyWindow(display, window)
   discard XCloseDisplay(display)
