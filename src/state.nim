@@ -1,4 +1,4 @@
-# scr/state.nim
+# src/state.nim
 #
 # Defines all shared data structures and global state variables for the application.
 # By centralizing state here, other modules can import just what they need and
