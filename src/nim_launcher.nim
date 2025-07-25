@@ -103,7 +103,7 @@ proc initLauncherConfig() =
   config.borderWidth = 2
   config.prompt = "> "
   config.cursor = "_"
-  var themeName = "Nord"
+  var themeName = ""
 
   # 2. Define config path and create a default file if necessary.
   let configPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
@@ -116,7 +116,7 @@ max_visible_items = 15
 center = true
 position_x = 500
 position_y = 50
-vertical_align = "one-third"
+vertical_align = "one-third" #usage: "one-third", "top", "center"
 
 [colors]
 background = "#2E3440"
@@ -133,7 +133,9 @@ prompt = "> "
 cursor = "_"
 
 [theme]
-name: "Nord",
+# Leaving this empty will use the colour scheme in the [colors] section. 
+# or choose one of the inbuilt themes below to override by un-commenting.
+#name: "Nord",
 #name: "Solarized Dark"
 #name: "Solarized Light"
 #name: "Gruvbox Dark"
@@ -148,7 +150,7 @@ name: "Nord",
 #name: "Ayu Light"
 #name: "Catppuccin Mocha"
 #name: "Catppuccin Latte"
-#name: "Catppuccin Frappé"
+#name: "Catppuccin Frappe"
 """
     try:
       createDir(configPath.parentDir)

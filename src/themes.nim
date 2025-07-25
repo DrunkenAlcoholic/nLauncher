@@ -128,7 +128,7 @@ const arrthemes*: seq[Theme] = @[
     borderColorHex: "#E6E6E6",
   ),
   Theme(
-    name: "Catppuccin Frappé",
+    name: "Catppuccin Frappe",
     bgColorHex: "#F2E9E1",
     fgColorHex: "#6C6A7B",
     highlightBgColorHex: "#F2CDCD",
