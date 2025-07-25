@@ -3,7 +3,7 @@
 # Handles the logic for finding and parsing .desktop files to create a list
 # of launchable applications.
 
-import std/[os, strutils, streams, tables, options]
+import std/[os, strutils, streams, tables, times, options]
 import state 
 
 proc getBaseExec*(exec: string): string =
@@ -35,8 +35,13 @@ proc parseDesktopFile*(path: string): Option[DesktopApp] =
   ## Parses a single .desktop file and returns a DesktopApp object if it's a
   ## valid, launchable, graphical application.
 
+  let tStart = epochTime()
+
   let stream = newFileStream(path, fmRead)
-  if stream == nil: return none(DesktopApp)
+  if stream == nil:
+    let tEnd = epochTime()
+    echo "[PARSE FAIL] ", path, " in ", tEnd - tStart, "s"
+    return none(DesktopApp)
   defer: stream.close()
 
   var inDesktopEntrySection = false
@@ -71,13 +76,19 @@ proc parseDesktopFile*(path: string): Option[DesktopApp] =
   let noDisplay = entries.getOrDefault("NoDisplay", "false").toLower == "true"
   let isTerminalApp = entries.getOrDefault("Terminal", "false").toLower == "true"
   let hasIcon = icon.len > 0
-  
+
   # Apply our filtering rules to exclude unwanted entries.
-  if noDisplay or isTerminalApp or name.len == 0 or exec.len == 0:
-    return none(DesktopApp)
+  let valid =
+    not noDisplay and not isTerminalApp and name.len > 0 and exec.len > 0 and
+    not categories.contains("Settings") and not categories.contains("System")
   
-  if categories.contains("Settings") or categories.contains("System"):
-    return none(DesktopApp)
+  let tEnd = epochTime()
+  let duration = tEnd - tStart
+  if duration > 0.001:  # Highlight anything slower than 1ms
+    echo "[PARSE] ", path, " took ", duration * 1000, " ms"
 
   # If all checks pass, we have a valid application.
-  return some(DesktopApp(name: name, exec: exec, hasIcon: hasIcon))
+  if valid:
+    return some(DesktopApp(name: name, exec: exec, hasIcon: hasIcon))
+  else:
+    return none(DesktopApp)

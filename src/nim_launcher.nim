@@ -3,11 +3,9 @@
 # The main entry point for the application.
 # modules to initialize the launcher, load data, and run the main event loop.
 
-import
-  std/
-    [os, osproc, strutils, options, tables, sequtils, algorithm, parsecfg, json, times]
+import std/[os, osproc, strutils, options, tables, sequtils, 
+            algorithm, parsecfg, json, times, editdistance]
 import x11/[xlib, xutil, x, keysym]
-
 # Import our custom modules
 import state, parser, gui, themes
 
@@ -15,6 +13,9 @@ import state, parser, gui, themes
 
 proc loadApplications() =
   ## Loads the list of applications, using a smart cache to ensure fast startups.
+
+  let totalStart = epochTime()
+
   let homeDir = getHomeDir()
   let usrAppDir = "/usr/share/applications"
   let localAppDir = homeDir / ".local/share/applications"
@@ -30,6 +31,7 @@ proc loadApplications() =
     currentLocalMtime = getLastModificationTime(localAppDir).toUnixFloat()
 
   # 2. Check for a valid cache file.
+  let cacheCheckStart = epochTime()
   if fileExists(cacheFile):
     try:
       let content = readFile(cacheFile)
@@ -39,8 +41,9 @@ proc loadApplications() =
       if cache.usrMtime == currentUsrMtime and cache.localMtime == currentLocalMtime:
         allApps = cache.apps
         filteredApps = allApps
-        echo "Loaded ", allApps.len, " applications from cache."
-        return # Cache is valid, we're done.
+        echo "Loaded ", allApps.len, " apps from cache. (", epochTime() - cacheCheckStart, "s)"
+        echo "Total load time: ", epochTime() - totalStart, "s"
+        return
     except JsonParsingError:
       echo "Cache file corrupted (malformed JSON), re-scanning..."
     except ValueError:
@@ -48,16 +51,18 @@ proc loadApplications() =
 
   # 3. If cache is invalid, perform a full scan using our parser module.
   echo "Cache invalid or missing, scanning for applications..."
+  let scanStart = epochTime()
   var apps = initTable[string, DesktopApp]()
   let searchPaths = [localAppDir, usrAppDir]
+
   for basePath in searchPaths:
-    if not dirExists(basePath):
-      continue
+    if not dirExists(basePath): continue
     for path in walkFiles(basePath / "*.desktop"):
       let appOpt = parseDesktopFile(path)
       if appOpt.isSome:
         let newApp = appOpt.get()
         let baseExec = getBaseExec(newApp.exec)
+
         # De-duplicate applications based on their base command.
         if not apps.hasKey(baseExec):
           apps[baseExec] = newApp
@@ -66,20 +71,23 @@ proc loadApplications() =
           let existingApp = apps[baseExec]
           if newApp.hasIcon and not existingApp.hasIcon:
             apps[baseExec] = newApp
+  echo "Scan duration: ", epochTime() - scanStart, "s"
 
   allApps = toSeq(apps.values).sortedByIt(it.name)
   filteredApps = allApps
   echo "Found ", allApps.len, " unique applications."
-
+  
   # 4. Write the new application list back to the cache for future runs.
-  let newCache =
-    CacheData(usrMtime: currentUsrMtime, localMtime: currentLocalMtime, apps: allApps)
+  let cacheWriteStart = epochTime()
+  let newCache = CacheData(usrMtime: currentUsrMtime, localMtime: currentLocalMtime, apps: allApps)
   try:
     createDir(cacheDir)
     writeFile(cacheFile, pretty(%newCache))
-    echo "Saved new application list to cache."
+    echo "Saved cache in ", epochTime() - cacheWriteStart, "s"
   except:
-    echo "Warning: Could not write to cache file at ", cacheFile
+    echo "Warning: Failed to write cache."
+
+  echo "Total load time: ", epochTime() - totalStart, "s"
 
 # --- Configuration Loading ---
 
@@ -207,24 +215,31 @@ cursor = "_"
 
 # --- Core Application Logic ---
 
-proc fuzzyMatch(query: string, target: string): bool =
-  ## Performs a simple, case-insensitive fuzzy match.
-  ## Returns true if all characters in `query` appear in `target` in the same order.
-  if query.len == 0:
-    return true
-  var queryIndex = 0
-  for char in target.toLower:
-    if queryIndex < query.len and query.toLower[queryIndex] == char:
-      queryIndex += 1
-      if queryIndex == query.len:
+proc betterFuzzyMatch(query: string, target: string): bool =
+  ## Enhanced fuzzy match:
+  ##  - Allows small typos using Levenshtein distance ≤ 2
+  let q = query.toLowerAscii
+  let t = target.toLowerAscii
+
+  if q.len == 0: return true
+  if t.contains(q): return true
+  if editDistanceAscii(q, t) <= 2: return true
+
+  # Optional: fallback to old subsequence style match
+  var qi = 0
+  for ch in t:
+    if qi < q.len and q[qi] == ch:
+      qi += 1
+      if qi == q.len:
         return true
+
   return false
 
 proc updateFilteredApps() =
   ## Updates the `filteredApps` list based on the current `inputText`.
   filteredApps = allApps.filter(
     proc(app: DesktopApp): bool =
-      fuzzyMatch(inputText, app.name)
+      betterFuzzyMatch(inputText, app.name)
   )
   selectedIndex = 0
   viewOffset = 0 # Reset scroll on new search
