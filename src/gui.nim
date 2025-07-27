@@ -1,150 +1,207 @@
-# scr/gui.nim
+# src/gui.nim
 #
 # Handles all X11 window creation, event handling, and drawing for the launcher.
 
 import strutils
-import x11/[xlib, x]
+import x11/[xlib, xft, x, xrender]
 import state
+
+var font: PXftFont
+var xftDraw: PXftDraw
+var xftColorFg, xftColorHighlightFg: XftColor
+var xftColorBg, xftColorHighlightBg: culong
 
 # --- Color Handling ---
 
 proc parseColor*(hex: string): culong =
-  ## Converts a user-friendly hex color string (e.g., "#RRGGBB") into a pixel
-  ## value that the X11 server can understand.
+  ## Converts a hex string like "#RRGGBB" to a pixel value for raw Xlib drawing.
   var r, g, b: int
   if hex.startsWith("#") and hex.len == 7:
     try:
-      # Use the standard library to parse the R, G, and B hex components.
       r = parseHexInt(hex[1..2])
       g = parseHexInt(hex[3..4])
       b = parseHexInt(hex[5..6])
     except ValueError:
       echo "Warning: Invalid hex character in color string: ", hex
-      return 0 # Default to black on error
+      return 0
   else:
     echo "Warning: Invalid hex color format: ", hex
-    return 0 # Default to black on error
+    return 0
 
   var color: XColor
-  # X11 requires colors in a 16-bit range (0-65535), not 8-bit (0-255).
-  # We scale the values by multiplying by 257 (since 65535 / 255 = 257).
   color.red = uint16(r * 257)
   color.green = uint16(g * 257)
   color.blue = uint16(b * 257)
   color.flags = cast[cchar](DoRed or DoGreen or DoBlue)
 
-  # Ask the X server to allocate our desired color in its colormap.
   if XAllocColor(display, XDefaultColormap(display, screen), color.addr) == 0:
     echo "Warning: Failed to allocate color: ", hex
     return 0
-  
+
   return color.pixel
+
+proc allocXftColor(hex: string, colorRef: var XftColor) =
+  ## Allocates a high-quality font color using XftColor + XRenderColor.
+  var r, g, b: int
+  if hex.startsWith("#") and hex.len == 7:
+    try:
+      r = parseHexInt(hex[1..2])
+      g = parseHexInt(hex[3..4])
+      b = parseHexInt(hex[5..6])
+    except ValueError:
+      quit "Invalid color hex: " & hex
+  else:
+    quit "Invalid hex color format: " & hex
+
+  var xrenderColor: XRenderColor
+  xrenderColor.red = uint16(r * 257)
+  xrenderColor.green = uint16(g * 257)
+  xrenderColor.blue = uint16(b * 257)
+  xrenderColor.alpha = 65535
+
+  if XftColorAllocValue(display,
+                        DefaultVisual(display, screen),
+                        DefaultColormap(display, screen),
+                        addr xrenderColor,
+                        addr colorRef) == 0:
+    quit "Failed to allocate XftColor for: " & hex
+
+proc loadFont(display: PDisplay, screen: cint, fontName: string): PXftFont =
+  let f = XftFontOpenName(display, screen, fontName)
+  if f.isNil:
+    quit "Failed to load font: " & fontName
+  return f
 
 # --- Window Initialization and Management ---
 
 proc initGui*() =
   ## Connects to the X server and creates the main launcher window.
-  
-  # 1. Connect to the X server and get the default screen.
+
   display = XOpenDisplay(nil)
   if display == nil: quit "Failed to open display"
   screen = XDefaultScreen(display)
 
-  # 2. Parse all color strings from the config into usable X11 pixel values.
+  font = loadFont(display, screen, config.fontName)
+
   config.bgColor = parseColor(config.bgColorHex)
   config.fgColor = parseColor(config.fgColorHex)
   config.highlightBgColor = parseColor(config.highlightBgColorHex)
   config.highlightFgColor = parseColor(config.highlightFgColorHex)
   config.borderColor = parseColor(config.borderColorHex)
 
-  # 3. Calculate the final window position based on the config.
   var finalX, finalY: cint
   if config.centerWindow:
     let screenWidth = XDisplayWidth(display, screen)
     let screenHeight = XDisplayHeight(display, screen)
-    finalX = cint((screenWidth - config.winWidth) / 2)
+    finalX = cint((screenWidth - config.winWidth) div 2)
     case config.verticalAlign
-    of "top": finalY = cint(50)
-    of "center": finalY = cint((screenHeight - config.winMaxHeight) / 2)
-    else: finalY = cint((screenHeight - config.winMaxHeight) / 3) # Default
+    of "top": finalY = 50
+    of "center": finalY = cint((screenHeight - config.winMaxHeight) div 2)
+    else: finalY = cint((screenHeight - config.winMaxHeight) div 3)
   else:
     finalX = cint(config.positionX)
     finalY = cint(config.positionY)
 
-  # 4. Set the window's attributes. This is where we make it borderless.
   var attributes: XSetWindowAttributes
-  # This crucial flag tells the window manager to completely ignore our window,
-  # preventing it from adding a title bar, borders, or shadows.
   attributes.override_redirect = true.XBool
   attributes.background_pixel = config.bgColor
-  # Specify which events we want to listen for.
   attributes.event_mask = KeyPressMask or ExposureMask or FocusChangeMask
   let valuemask: culong = CWOverrideRedirect or CWBackPixel or CWEventMask
 
-  # 5. Create the window with our specified attributes.
   window = XCreateWindow(display, XRootWindow(display, screen), finalX, finalY,
-    cuint(config.winWidth), cuint(config.winMaxHeight), 0, CopyFromParent, InputOutput, nil,
-    valuemask, attributes.addr)
-  
-  # 6. Get the default Graphics Context, which holds drawing info like colors.
+    cuint(config.winWidth), cuint(config.winMaxHeight), 0, CopyFromParent,
+    InputOutput, nil, valuemask, addr attributes)
+
   graphicsContext = XDefaultGC(display, screen)
 
-  # 7. Make the window visible and request keyboard focus.
   discard XMapWindow(display, window)
   discard XSetInputFocus(display, window, RevertToParent, CurrentTime)
-  discard XFlush(display) # Send all commands to the X server now.
+  discard XFlush(display)
+
+  # Initialize XftDraw (must be after XMapWindow)
+  xftDraw = XftDrawCreate(display, window, DefaultVisual(display, screen), DefaultColormap(display, screen))
+  if xftDraw.isNil:
+    quit "Failed to create XftDraw"
+
+  # Allocate Xft colors for text
+  allocXftColor(config.fgColorHex, xftColorFg)
+  allocXftColor(config.highlightFgColorHex, xftColorHighlightFg)
+
+  # Use raw Xlib color pixels for rectangle fills
+  xftColorBg = config.bgColor
+  xftColorHighlightBg = config.highlightBgColor
+
+  echo "InitGUI Using font: ", config.fontName
 
 # --- Drawing Procedures ---
 
 proc drawText*(text: string, x, y: int, isSelected: bool) =
-  ## Draws a string of text onto the window at the given coordinates.
-  let (fg, bg) =
-    if isSelected: (config.highlightFgColor, config.highlightBgColor)
-    else: (config.fgColor, config.bgColor)
-  
-  discard XSetForeground(display, graphicsContext, fg)
-  discard XSetBackground(display, graphicsContext, bg)
-  
-  # The X11 C library requires specific C-types, so we must cast our Nim types.
-  discard XDrawString(display, window, graphicsContext,
-                      cint(x), cint(y), cstring(text), cint(text.len))
+  ## Draws text using Xft at the given coordinates with font and highlight handling.
+  if font.isNil or xftDraw.isNil:
+    echo "Error: font or xftDraw is nil. Cannot draw text."
+    return
+
+  let fgColor = if isSelected: xftColorHighlightFg.addr else: xftColorFg.addr
+  let bgColor = if isSelected: xftColorHighlightBg else: xftColorBg
+
+  let ascent = font.ascent
+  let descent = font.descent
+  let totalHeight = ascent + descent
+  let verticalOffset = (config.lineHeight - totalHeight) div 2
+
+  let rectY = y - ascent - verticalOffset - 1
+  let rectHeight = config.lineHeight + 2
+
+  let marginX = max(6, config.borderWidth + 2)  # <- horizontal padding respects border
+  let marginW = config.winWidth - (marginX * 2)
+
+  discard XSetForeground(display, graphicsContext, bgColor)
+  discard XFillRectangle(display, window, graphicsContext,
+    cint(marginX), cint(rectY),
+    cuint(marginW), cuint(rectHeight))
+
+  XftDrawStringUtf8(
+    xftDraw,
+    fgColor,
+    font,
+    cint(x),
+    cint(y),
+    cast[ptr FcChar8](text[0].addr),
+    cint(text.len)
+  )
+
+
+
 
 proc redrawWindow*() =
-  ## Redraws the entire contents of the launcher window based on the current state.
   discard XClearWindow(display, window)
 
-  # 1. Draw the window border (if configured).
   if config.borderWidth > 0:
     discard XSetForeground(display, graphicsContext, config.borderColor)
-    # Draw multiple rectangles to create a thick border.
     for i in 0 ..< config.borderWidth:
       discard XDrawRectangle(display, window, graphicsContext,
         cint(i), cint(i),
         cuint(config.winWidth - 1 - (i*2)), cuint(config.winMaxHeight - 1 - (i*2)))
 
-  # 2. Draw the user input field.
   drawText(config.prompt & inputText & config.cursor, 20, 30, isSelected = false)
 
-  # 3. Draw the visible portion of the application list.
-  let listStartY = 50
+  #let listStartY = 50
+  let listStartY = 30 + config.lineHeight
+
   for i in 0 ..< config.maxVisibleItems:
-    # Calculate the actual index in the filtered list based on our "camera"
     let itemIndex = viewOffset + i
-    if itemIndex >= filteredApps.len: break # Stop if we run out of apps to show
+    if itemIndex >= filteredApps.len: break
 
     let app = filteredApps[itemIndex]
     let yPos = listStartY + (i * config.lineHeight)
     let isSelected = (itemIndex == selectedIndex)
 
-    # If this item is the selected one, draw a highlight rectangle first.
     if isSelected:
       discard XSetForeground(display, graphicsContext, config.highlightBgColor)
       discard XFillRectangle(display, window, graphicsContext,
-        cint(10), cint(yPos - config.lineHeight + 5),
+        10, cint(yPos - config.lineHeight + 5),
         cuint(config.winWidth - 20), cuint(config.lineHeight))
-    
-    # Draw the application name.
-    drawText(app.name, 20, yPos, isSelected = isSelected)
-  
-  # 4. Flush the drawing buffer to ensure everything appears on screen.
+
+    drawText(app.name, 20, yPos, isSelected)
+
   discard XFlush(display)

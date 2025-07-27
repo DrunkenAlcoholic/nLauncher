@@ -43,6 +43,10 @@ type
     borderWidth*: int
     # Populated at runtime from the hex codes above.
     bgColor*, fgColor*, highlightBgColor*, highlightFgColor*, borderColor*: culong
+    # ThemeName
+    themeName*: string
+    # Font 
+    fontName*: string
 
 # --- Global State Variables ---
 

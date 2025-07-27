@@ -32,62 +32,46 @@ proc getBestValue*(entries: Table[string, string], baseKey: string): string =
   return ""
 
 proc parseDesktopFile*(path: string): Option[DesktopApp] =
-  ## Parses a single .desktop file and returns a DesktopApp object if it's a
-  ## valid, launchable, graphical application.
-
-  let tStart = epochTime()
+  #let tStart = epochTime()
 
   let stream = newFileStream(path, fmRead)
   if stream == nil:
-    let tEnd = epochTime()
-    echo "[PARSE FAIL] ", path, " in ", tEnd - tStart, "s"
+    echo "[PARSE FAIL] ", path, " (file not readable)"
     return none(DesktopApp)
   defer: stream.close()
 
   var inDesktopEntrySection = false
-  # We use a table to collect all key-value pairs from the main section.
-  # This is tolerant of duplicate keys, which are common for localization.
   var entries = initTable[string, string]()
 
   for line in stream.lines:
-    let strippedLine = line.strip()
-    if strippedLine.len == 0 or strippedLine.startsWith("#"): continue
-
-    # Check for section headers to ensure we're in the right place.
-    if strippedLine.startsWith("[") and strippedLine.endsWith("]"):
-      inDesktopEntrySection = (strippedLine == "[Desktop Entry]")
+    let stripped = line.strip()
+    if stripped.len == 0 or stripped.startsWith("#"):
       continue
-
-    # Only process lines if we're in the "[Desktop Entry]" section.
-    if inDesktopEntrySection and "=" in strippedLine:
-      let parts = strippedLine.split('=', 1)
+    if stripped.startsWith("[") and stripped.endsWith("]"):
+      inDesktopEntrySection = (stripped == "[Desktop Entry]")
+      continue
+    if inDesktopEntrySection and "=" in stripped:
+      let parts = stripped.split('=', 1)
       if parts.len == 2:
         entries[parts[0].strip()] = parts[1].strip()
 
-  # -- Extract and Filter --
-  
-  # Use our helper to get the most important, potentially localized values.
   let name = getBestValue(entries, "Name")
   let exec = getBestValue(entries, "Exec")
-
-  # For simple values, we can get them directly.
   let categories = entries.getOrDefault("Categories", "")
   let icon = entries.getOrDefault("Icon", "")
-  let noDisplay = entries.getOrDefault("NoDisplay", "false").toLower == "true"
-  let isTerminalApp = entries.getOrDefault("Terminal", "false").toLower == "true"
+  let noDisplay = entries.getOrDefault("NoDisplay", "false").toLowerAscii() == "true"
+  let isTerminalApp = entries.getOrDefault("Terminal", "false").toLowerAscii() == "true"
   let hasIcon = icon.len > 0
 
-  # Apply our filtering rules to exclude unwanted entries.
   let valid =
-    not noDisplay and not isTerminalApp and name.len > 0 and exec.len > 0 and
+    name.len > 0 and exec.len > 0 and
+    not noDisplay and not isTerminalApp and
     not categories.contains("Settings") and not categories.contains("System")
-  
-  let tEnd = epochTime()
-  let duration = tEnd - tStart
-  if duration > 0.001:  # Highlight anything slower than 1ms
-    echo "[PARSE] ", path, " took ", duration * 1000, " ms"
 
-  # If all checks pass, we have a valid application.
+  #let duration = epochTime() - tStart
+  #if duration > 0.001:
+  #  echo "[PARSE] ", path, " took ", duration * 1000, " ms"
+
   if valid:
     return some(DesktopApp(name: name, exec: exec, hasIcon: hasIcon))
   else:

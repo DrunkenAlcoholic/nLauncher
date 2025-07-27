@@ -5,9 +5,9 @@
 
 import std/[os, osproc, strutils, options, tables, sequtils, 
             algorithm, parsecfg, json, times, editdistance]
-import x11/[xlib, xutil, x, keysym]
+import x11/[xlib, xutil, xft, x, keysym]
 # Import our custom modules
-import state, parser, gui, themes
+import ./[state, parser, gui, themes]
 
 # --- Data Loading and Caching ---
 
@@ -111,7 +111,8 @@ proc initLauncherConfig() =
   config.borderWidth = 2
   config.prompt = "> "
   config.cursor = "_"
-  var themeName = ""
+  config.fontName = "Noto Sans:size=11"
+  config.themeName = ""
 
   # 2. Define config path and create a default file if necessary.
   let configPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
@@ -126,19 +127,22 @@ position_x = 500
 position_y = 50
 vertical_align = "one-third" #usage: "one-third", "top", "center"
 
+[font]
+fontname = Noto Sans:size=11
+
+[input]
+prompt = "> "
+cursor = "_"
+
+[border]
+width = 2
+
 [colors]
 background = "#2E3440"
 foreground = "#D8DEE9"
 highlight_background = "#88C0D0"
 highlight_foreground = "#2E3440"
 border_color = "#4C566A"
-
-[border]
-width = 2
-
-[input]
-prompt = "> "
-cursor = "_"
 
 [theme]
 # Leaving this empty will use the colour scheme in the [colors] section. 
@@ -159,6 +163,7 @@ cursor = "_"
 #name: "Catppuccin Mocha"
 #name: "Catppuccin Latte"
 #name: "Catppuccin Frappe"
+
 """
     try:
       createDir(configPath.parentDir)
@@ -197,11 +202,12 @@ cursor = "_"
     config.borderWidth = parseInt("border", "width", config.borderWidth)
     config.prompt = cfg.getSectionValue("input", "prompt", config.prompt)
     config.cursor = cfg.getSectionValue("input", "cursor", config.cursor)
-    themeName = cfg.getSectionValue("theme", "name", themeName)
+    config.themeName = cfg.getSectionValue("theme", "name", config.themeName)
+    config.fontName = cfg.getSectionValue("font", "fontname", config.fontName)
 
-  # --- Theme selection logic ---
+  # --- Theme selection logic --- this needs fixing
   for theme in arrthemes:
-    if theme.name.toLower == themeName.toLower:
+    if theme.name.toLower == config.themeName.toLower:
       config.bgColorHex = theme.bgColorHex
       config.fgColorHex = theme.fgColorHex
       config.highlightBgColorHex = theme.highlightBgColorHex
@@ -212,6 +218,8 @@ cursor = "_"
   # 4. Calculate the final window height based on the loaded (or default) settings.
   let inputHeight = 40
   config.winMaxHeight = inputHeight + (config.maxVisibleItems * config.lineHeight)
+
+  echo "Using font: ", config.fontName
 
 # --- Core Application Logic ---
 
