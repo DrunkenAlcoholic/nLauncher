@@ -2,7 +2,7 @@
 
 > A simple, fast, and highly configurable application launcher for Linux (X11) written in pure Nim. Inspired by Rofi, designed for personal use and customization.
 
-![Nim Launcher with Dracula Colours](ScreenShot.png)
+<img src="Screenshot.gif" width="600" alt="Nim Launcher">
 
 ## Features
 
@@ -159,8 +159,6 @@ Leave `name` empty to use `[colors]`.
 - Optional application icon display (with toggle in config)
 - Real-time highlight of matched letters during fuzzy search
 - Optional mouse interaction or UI enhancements
-
----
 
 ## Disclaimer
 
