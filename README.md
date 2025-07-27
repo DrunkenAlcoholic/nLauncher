@@ -6,21 +6,20 @@
 
 ## Features
 
-- **Fuzzy Search:** Instantly filters applications as you type.
+- **Fuzzy Search:** Instantly filters applications as you type, accounts for small typo's.
 - **Keyboard Navigation:** Fully controllable with the keyboard.
 - **Borderless & Centered:** Clean and undecorated, appears centered on screen.
 - **Fast Startup:** Caches results; only re-scans when `.desktop` files change.
 - **Theme Support:** Choose from built-in themes or define your own.
 - **Font Configuration:** Customize font family and size via config.
-- **Lightweight:** No GUI toolkit overhead—pure X11 and Xft.
+- **Lightweight:** No GUI toolkit overhead—pure Nim and X11.
 
 ## Getting Started
 
-### Requirements
+### Requirements(for building)
 
 - **Nim compiler**
 - **X11 development libraries**
-- **Optional:** [Fontconfig](https://www.freedesktop.org/wiki/Software/fontconfig/) if using custom fonts.
 
 ### Install Dependencies
 
@@ -157,6 +156,9 @@ Leave `name` empty to use `[colors]`.
 - Optional mouse interaction or UI enhancements
 
 ---
+
+## Disclaimer
+ChatGPT helped me refine and improve this program. While the core functionality and workflow came from my own needs, the AI assistance was invaluable for handling edge cases, improving error handling, and making the code more robust across different Linux environments, ChatGPT also assisted in writing this readme.
 
 ## License
 
