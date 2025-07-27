@@ -55,7 +55,7 @@ var
   screen*: cint
 
   # -- Application State --
-  config*: Config                        # The currently loaded configuration.
+  config*: Config                       # The currently loaded configuration.
   allApps*: seq[DesktopApp]             # The master list of all found applications.
   filteredApps*: seq[DesktopApp]        # The list of apps currently visible after fuzzy searching.
 
