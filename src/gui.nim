@@ -6,6 +6,7 @@ import strutils
 import x11/[xlib, xft, x, xrender]
 import state
 
+# --- Xft and Xlib Color Variables ---
 var font: PXftFont
 var xftDraw: PXftDraw
 var xftColorFg, xftColorHighlightFg: XftColor
@@ -14,13 +15,13 @@ var xftColorBg, xftColorHighlightBg: culong
 # --- Color Handling ---
 
 proc parseColor*(hex: string): culong =
-  ## Converts a hex string like "#RRGGBB" to a pixel value for raw Xlib drawing.
+  ## Converts a hex string like "#RRGGBB" to a pixel value for Xlib.
   var r, g, b: int
   if hex.startsWith("#") and hex.len == 7:
     try:
-      r = parseHexInt(hex[1..2])
-      g = parseHexInt(hex[3..4])
-      b = parseHexInt(hex[5..6])
+      r = parseHexInt(hex[1 .. 2])
+      g = parseHexInt(hex[3 .. 4])
+      b = parseHexInt(hex[5 .. 6])
     except ValueError:
       echo "Warning: Invalid hex character in color string: ", hex
       return 0
@@ -41,13 +42,13 @@ proc parseColor*(hex: string): culong =
   return color.pixel
 
 proc allocXftColor(hex: string, colorRef: var XftColor) =
-  ## Allocates a high-quality font color using XftColor + XRenderColor.
+  ## Allocates a font color using XftColor + XRenderColor.
   var r, g, b: int
   if hex.startsWith("#") and hex.len == 7:
     try:
-      r = parseHexInt(hex[1..2])
-      g = parseHexInt(hex[3..4])
-      b = parseHexInt(hex[5..6])
+      r = parseHexInt(hex[1 .. 2])
+      g = parseHexInt(hex[3 .. 4])
+      b = parseHexInt(hex[5 .. 6])
     except ValueError:
       quit "Invalid color hex: " & hex
   else:
@@ -59,14 +60,24 @@ proc allocXftColor(hex: string, colorRef: var XftColor) =
   xrenderColor.blue = uint16(b * 257)
   xrenderColor.alpha = 65535
 
-  if XftColorAllocValue(display,
-                        DefaultVisual(display, screen),
-                        DefaultColormap(display, screen),
-                        addr xrenderColor,
-                        addr colorRef) == 0:
+  if XftColorAllocValue(
+    display,
+    DefaultVisual(display, screen),
+    DefaultColormap(display, screen),
+    addr xrenderColor,
+    addr colorRef,
+  ) == 0:
     quit "Failed to allocate XftColor for: " & hex
 
+proc updateGuiColors*() =
+  ## Updates all Xft and Xlib color variables after a theme change.
+  allocXftColor(config.fgColorHex, xftColorFg)
+  allocXftColor(config.highlightFgColorHex, xftColorHighlightFg)
+  xftColorBg = config.bgColor
+  xftColorHighlightBg = config.highlightBgColor
+
 proc loadFont(display: PDisplay, screen: cint, fontName: string): PXftFont =
+  ## Loads the specified font using Xft.
   let f = XftFontOpenName(display, screen, fontName)
   if f.isNil:
     quit "Failed to load font: " & fontName
@@ -76,28 +87,33 @@ proc loadFont(display: PDisplay, screen: cint, fontName: string): PXftFont =
 
 proc initGui*() =
   ## Connects to the X server and creates the main launcher window.
-
   display = XOpenDisplay(nil)
-  if display == nil: quit "Failed to open display"
+  if display == nil:
+    quit "Failed to open display"
   screen = XDefaultScreen(display)
 
   font = loadFont(display, screen, config.fontName)
 
+  # Parse colors for Xlib
   config.bgColor = parseColor(config.bgColorHex)
   config.fgColor = parseColor(config.fgColorHex)
   config.highlightBgColor = parseColor(config.highlightBgColorHex)
   config.highlightFgColor = parseColor(config.highlightFgColorHex)
   config.borderColor = parseColor(config.borderColorHex)
 
+  # Calculate window position
   var finalX, finalY: cint
   if config.centerWindow:
     let screenWidth = XDisplayWidth(display, screen)
     let screenHeight = XDisplayHeight(display, screen)
     finalX = cint((screenWidth - config.winWidth) div 2)
     case config.verticalAlign
-    of "top": finalY = 50
-    of "center": finalY = cint((screenHeight - config.winMaxHeight) div 2)
-    else: finalY = cint((screenHeight - config.winMaxHeight) div 3)
+    of "top":
+      finalY = 50
+    of "center":
+      finalY = cint((screenHeight - config.winMaxHeight) div 2)
+    else:
+      finalY = cint((screenHeight - config.winMaxHeight) div 3)
   else:
     finalX = cint(config.positionX)
     finalY = cint(config.positionY)
@@ -108,9 +124,20 @@ proc initGui*() =
   attributes.event_mask = KeyPressMask or ExposureMask or FocusChangeMask
   let valuemask: culong = CWOverrideRedirect or CWBackPixel or CWEventMask
 
-  window = XCreateWindow(display, XRootWindow(display, screen), finalX, finalY,
-    cuint(config.winWidth), cuint(config.winMaxHeight), 0, CopyFromParent,
-    InputOutput, nil, valuemask, addr attributes)
+  window = XCreateWindow(
+    display,
+    XRootWindow(display, screen),
+    finalX,
+    finalY,
+    cuint(config.winWidth),
+    cuint(config.winMaxHeight),
+    0,
+    CopyFromParent,
+    InputOutput,
+    nil,
+    valuemask,
+    addr attributes,
+  )
 
   graphicsContext = XDefaultGC(display, screen)
 
@@ -119,7 +146,9 @@ proc initGui*() =
   discard XFlush(display)
 
   # Initialize XftDraw (must be after XMapWindow)
-  xftDraw = XftDrawCreate(display, window, DefaultVisual(display, screen), DefaultColormap(display, screen))
+  xftDraw = XftDrawCreate(
+    display, window, DefaultVisual(display, screen), DefaultColormap(display, screen)
+  )
   if xftDraw.isNil:
     quit "Failed to create XftDraw"
 
@@ -152,13 +181,19 @@ proc drawText*(text: string, x, y: int, isSelected: bool) =
   let rectY = y - ascent - verticalOffset - 1
   let rectHeight = config.lineHeight + 2
 
-  let marginX = max(6, config.borderWidth + 2)  # <- horizontal padding respects border
+  let marginX = max(6, config.borderWidth + 2)
   let marginW = config.winWidth - (marginX * 2)
 
   discard XSetForeground(display, graphicsContext, bgColor)
-  discard XFillRectangle(display, window, graphicsContext,
-    cint(marginX), cint(rectY),
-    cuint(marginW), cuint(rectHeight))
+  discard XFillRectangle(
+    display,
+    window,
+    graphicsContext,
+    cint(marginX),
+    cint(rectY),
+    cuint(marginW),
+    cuint(rectHeight),
+  )
 
   XftDrawStringUtf8(
     xftDraw,
@@ -167,30 +202,43 @@ proc drawText*(text: string, x, y: int, isSelected: bool) =
     cint(x),
     cint(y),
     cast[ptr FcChar8](text[0].addr),
-    cint(text.len)
+    cint(text.len),
   )
 
-
-
-
 proc redrawWindow*() =
-  discard XClearWindow(display, window)
+  ## Redraws the entire launcher window.
+  discard XSetForeground(display, graphicsContext, config.bgColor)
+  discard XFillRectangle(
+    display,
+    window,
+    graphicsContext,
+    0,
+    0,
+    cuint(config.winWidth),
+    cuint(config.winMaxHeight),
+  )
 
   if config.borderWidth > 0:
     discard XSetForeground(display, graphicsContext, config.borderColor)
     for i in 0 ..< config.borderWidth:
-      discard XDrawRectangle(display, window, graphicsContext,
-        cint(i), cint(i),
-        cuint(config.winWidth - 1 - (i*2)), cuint(config.winMaxHeight - 1 - (i*2)))
+      discard XDrawRectangle(
+        display,
+        window,
+        graphicsContext,
+        cint(i),
+        cint(i),
+        cuint(config.winWidth - 1 - (i * 2)),
+        cuint(config.winMaxHeight - 1 - (i * 2)),
+      )
 
   drawText(config.prompt & inputText & config.cursor, 20, 30, isSelected = false)
 
-  #let listStartY = 50
   let listStartY = 30 + config.lineHeight
 
   for i in 0 ..< config.maxVisibleItems:
     let itemIndex = viewOffset + i
-    if itemIndex >= filteredApps.len: break
+    if itemIndex >= filteredApps.len:
+      break
 
     let app = filteredApps[itemIndex]
     let yPos = listStartY + (i * config.lineHeight)
@@ -198,9 +246,15 @@ proc redrawWindow*() =
 
     if isSelected:
       discard XSetForeground(display, graphicsContext, config.highlightBgColor)
-      discard XFillRectangle(display, window, graphicsContext,
-        10, cint(yPos - config.lineHeight + 5),
-        cuint(config.winWidth - 20), cuint(config.lineHeight))
+      discard XFillRectangle(
+        display,
+        window,
+        graphicsContext,
+        10,
+        cint(yPos - config.lineHeight + 5),
+        cuint(config.winWidth - 20),
+        cuint(config.lineHeight),
+      )
 
     drawText(app.name, 20, yPos, isSelected)
 

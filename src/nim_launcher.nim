@@ -1,13 +1,52 @@
 # src/nim_launcher.nim
 #
-# The main entry point for the application.
-# modules to initialize the launcher, load data, and run the main event loop.
+# Main entry point for the launcher. Handles config, theme, app loading, and event loop.
 
-import std/[os, osproc, strutils, options, tables, sequtils, 
-            algorithm, parsecfg, json, times, editdistance]
-import x11/[xlib, xutil, xft, x, keysym]
-# Import our custom modules
+import
+  std/[
+    os, osproc, strutils, options, tables, sequtils, algorithm, parsecfg, json, times,
+    editdistance,
+  ]
+import x11/[xlib, xutil, x, keysym]
 import ./[state, parser, gui, themes]
+
+var currentThemeIndex = 0
+
+# --- Theme Management ---
+
+proc applyTheme(config: var state.Config, themeName: string) =
+  ## Applies the selected theme to the config.
+  for i, theme in themeList:
+    if theme.name.toLower == themeName.toLower:
+      config.bgColorHex = theme.bgColorHex
+      config.fgColorHex = theme.fgColorHex
+      config.highlightBgColorHex = theme.highlightBgColorHex
+      config.highlightFgColorHex = theme.highlightFgColorHex
+      config.borderColorHex = theme.borderColorHex
+      currentThemeIndex = i
+      return
+
+proc updateParsedColors(config: var state.Config) =
+  ## Parses hex color strings to Xlib pixel values.
+  if config.bgColorHex.len == 7:
+    config.bgColor = parseColor(config.bgColorHex)
+  if config.fgColorHex.len == 7:
+    config.fgColor = parseColor(config.fgColorHex)
+  if config.highlightBgColorHex.len == 7:
+    config.highlightBgColor = parseColor(config.highlightBgColorHex)
+  if config.highlightFgColorHex.len == 7:
+    config.highlightFgColor = parseColor(config.highlightFgColorHex)
+  if config.borderColorHex.len == 7:
+    config.borderColor = parseColor(config.borderColorHex)
+
+proc cycleTheme(config: var state.Config) =
+  ## Cycles to the next theme and updates colors.
+  currentThemeIndex = (currentThemeIndex + 1) mod len(themeList)
+  let theme = themeList[currentThemeIndex]
+  applyTheme(config, theme.name)
+  updateParsedColors(config)
+  updateGuiColors()
+  redrawWindow()
 
 # --- Data Loading and Caching ---
 
@@ -41,7 +80,8 @@ proc loadApplications() =
       if cache.usrMtime == currentUsrMtime and cache.localMtime == currentLocalMtime:
         allApps = cache.apps
         filteredApps = allApps
-        echo "Loaded ", allApps.len, " apps from cache. (", epochTime() - cacheCheckStart, "s)"
+        echo "Loaded ",
+          allApps.len, " apps from cache. (", epochTime() - cacheCheckStart, "s)"
         echo "Total load time: ", epochTime() - totalStart, "s"
         return
     except JsonParsingError:
@@ -56,7 +96,8 @@ proc loadApplications() =
   let searchPaths = [localAppDir, usrAppDir]
 
   for basePath in searchPaths:
-    if not dirExists(basePath): continue
+    if not dirExists(basePath):
+      continue
     for path in walkFiles(basePath / "*.desktop"):
       let appOpt = parseDesktopFile(path)
       if appOpt.isSome:
@@ -76,10 +117,11 @@ proc loadApplications() =
   allApps = toSeq(apps.values).sortedByIt(it.name)
   filteredApps = allApps
   echo "Found ", allApps.len, " unique applications."
-  
+
   # 4. Write the new application list back to the cache for future runs.
   let cacheWriteStart = epochTime()
-  let newCache = CacheData(usrMtime: currentUsrMtime, localMtime: currentLocalMtime, apps: allApps)
+  let newCache =
+    CacheData(usrMtime: currentUsrMtime, localMtime: currentLocalMtime, apps: allApps)
   try:
     createDir(cacheDir)
     writeFile(cacheFile, pretty(%newCache))
@@ -205,15 +247,17 @@ border_color = "#4C566A"
     config.themeName = cfg.getSectionValue("theme", "name", config.themeName)
     config.fontName = cfg.getSectionValue("font", "fontname", config.fontName)
 
-  # --- Theme selection logic --- this needs fixing
-  for theme in arrthemes:
-    if theme.name.toLower == config.themeName.toLower:
-      config.bgColorHex = theme.bgColorHex
-      config.fgColorHex = theme.fgColorHex
-      config.highlightBgColorHex = theme.highlightBgColorHex
-      config.highlightFgColorHex = theme.highlightFgColorHex
-      config.borderColorHex = theme.borderColorHex
-      break
+  # --- Theme selection logic ---
+  if config.themeName.len > 0:
+    for theme in themeList:
+      if theme.name.toLower == config.themeName.toLower:
+        config.bgColorHex = theme.bgColorHex
+        config.fgColorHex = theme.fgColorHex
+        config.highlightBgColorHex = theme.highlightBgColorHex
+        config.highlightFgColorHex = theme.highlightFgColorHex
+        config.borderColorHex = theme.borderColorHex
+        currentThemeIndex = themeList.find(theme)
+        break
 
   # 4. Calculate the final window height based on the loaded (or default) settings.
   let inputHeight = 40
@@ -229,9 +273,12 @@ proc betterFuzzyMatch(query: string, target: string): bool =
   let q = query.toLowerAscii
   let t = target.toLowerAscii
 
-  if q.len == 0: return true
-  if t.contains(q): return true
-  if editDistanceAscii(q, t) <= 2: return true
+  if q.len == 0:
+    return true
+  if t.contains(q):
+    return true
+  if editDistanceAscii(q, t) <= 2:
+    return true
 
   # Optional: fallback to old subsequence style match
   var qi = 0
@@ -264,6 +311,7 @@ proc launchSelectedApp() =
     except:
       echo "Error launching application via shell: ", cleanExec
 
+# --- GUI Event Handling ---
 proc handleKeyPress(event: var XEvent) =
   ## Processes a key press event from the X server.
   var buffer: array[40, char]
@@ -271,7 +319,6 @@ proc handleKeyPress(event: var XEvent) =
   discard XLookupString(
     event.xkey.addr, cast[cstring](buffer[0].addr), cint(buffer.len), keysym.addr, nil
   )
-
   case keysym
   of XK_Escape:
     shouldExit = true
@@ -284,57 +331,43 @@ proc handleKeyPress(event: var XEvent) =
   of XK_Up:
     if selectedIndex > 0:
       selectedIndex -= 1
-      # Scroll the view up if the selection goes above the visible area.
       if selectedIndex < viewOffset:
         viewOffset = selectedIndex
   of XK_Down:
     if selectedIndex < filteredApps.len - 1:
       selectedIndex += 1
-      # Scroll the view down if the selection goes below the visible area.
       if selectedIndex >= viewOffset + config.maxVisibleItems:
         viewOffset = selectedIndex - config.maxVisibleItems + 1
+  of XK_F5:
+    cycleTheme(config)
   else:
-    # Handle printable characters.
     if buffer[0] != '\0' and buffer[0] >= ' ':
       inputText.add(buffer[0])
       updateFilteredApps()
 
 # --- Main Program Execution ---
-
 proc main() =
   ## The main entry point of the program.
-
-  # 1. Load settings from the config file (or create one).
   initLauncherConfig()
-
-  # 2. Load the application list (from cache or by scanning).
   loadApplications()
-
-  # 3. Create and display the GUI window.
   initGui()
-
-  # 4. Run the main event loop.
+  updateParsedColors(config)
   while not shouldExit:
     var event: XEvent
     discard XNextEvent(display, event.addr)
-
     case event.theType
     of Expose:
       redrawWindow()
     of KeyPress:
       handleKeyPress(event)
-      if not shouldExit: # Avoid a final redraw if we're closing
+      if not shouldExit:
         redrawWindow()
     of FocusOut:
-      # If the window loses focus, exit gracefully.
       echo "Focus lost. Closing."
       shouldExit = true
     else:
       discard
-
-  # 5. Clean up X11 resources before exiting.
   discard XDestroyWindow(display, window)
   discard XCloseDisplay(display)
 
-# Run the program.
 main()

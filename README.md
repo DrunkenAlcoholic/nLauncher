@@ -6,12 +6,13 @@
 
 ## Features
 
-- **Fuzzy Search:** Instantly filters applications as you type, accounts for small typo's.
+- **Fuzzy Search:** Instantly filters applications as you type, with typo tolerance.
 - **Keyboard Navigation:** Fully controllable with the keyboard.
+- **Live Theme Switching:** Press <kbd>F5</kbd> to cycle through built-in themes instantly.
 - **Borderless & Centered:** Clean and undecorated, appears centered on screen.
-- **Fast Startup:** Caches results; only re-scans when `.desktop` files change.
+- **Configurable UI:** Window position, border width, prompt, fonts, and more.
 - **Theme Support:** Choose from built-in themes or define your own.
-- **Font Configuration:** Customize font family and size via config.
+- **Fast Startup:** Caches results; only re-scans when `.desktop` files change.
 - **Lightweight:** No GUI toolkit overhead—pure Nim and X11.
 
 ## Getting Started
@@ -24,11 +25,13 @@
 ### Install Dependencies
 
 #### Arch Linux / Manjaro:
+
 ```bash
 sudo pacman -S nim libx11 libxft
 ```
 
 #### Ubuntu / Debian:
+
 ```bash
 sudo apt-get install nim libx11-dev libxft-dev
 ```
@@ -51,18 +54,20 @@ Move the resulting `nim_launcher` binary somewhere in your `$PATH`.
 Bind the launcher to a key combo in your window manager or desktop environment.
 
 For example, in i3:
+
 ```ini
 bindsym $mod+d exec ~/path/to/nim_launcher
 ```
 
 ### Controls
 
-| Key            | Action                          |
-|----------------|----------------------------------|
-| Type           | Filter applications via fuzzy search |
-| ↑ / ↓          | Navigate list                   |
-| Enter          | Launch selected application     |
-| Escape / Focus Lost | Exit launcher             |
+| Key                 | Action                               |
+| ------------------- | ------------------------------------ |
+| Type                | Filter applications via fuzzy search |
+| ↑ / ↓               | Navigate list                        |
+| Enter               | Launch selected application          |
+| Escape / Focus Lost | Exit launcher                        |
+| F5                  | Cycle through built-in themes        |
 
 ---
 
@@ -76,48 +81,48 @@ On first run, a default config file is created:
 
 ### `[window]`
 
-| Key                 | Description                                                              |
-|---------------------|--------------------------------------------------------------------------|
-| `width`             | Width of the window in pixels                                            |
-| `max_visible_items` | Max number of entries shown at once                                      |
-| `center`            | Center the window (`true`/`false`)                                       |
-| `position_x`        | X position if `center = false`                                           |
-| `position_y`        | Y position if `center = false`                                           |
-| `vertical_align`    | `"top"`, `"center"`, or `"one-third"` when centered                      |
+| Key                 | Description                                         |
+| ------------------- | --------------------------------------------------- |
+| `width`             | Width of the window in pixels                       |
+| `max_visible_items` | Max number of entries shown at once                 |
+| `center`            | Center the window (`true`/`false`)                  |
+| `position_x`        | X position if `center = false`                      |
+| `position_y`        | Y position if `center = false`                      |
+| `vertical_align`    | `"top"`, `"center"`, or `"one-third"` when centered |
 
 ### `[font]`
 
-| Key        | Description                                | Example                  |
-|------------|--------------------------------------------|--------------------------|
-| `fontname` | Font family and size (Xft-compatible name) | `Noto Sans:size=11`      |
+| Key        | Description                                | Example             |
+| ---------- | ------------------------------------------ | ------------------- |
+| `fontname` | Font family and size (Xft-compatible name) | `Noto Sans:size=11` |
 
 ### `[input]`
 
-| Key      | Description                      |
-|----------|----------------------------------|
-| `prompt` | Text shown before user input     |
-| `cursor` | Character shown at input cursor  |
+| Key      | Description                     |
+| -------- | ------------------------------- |
+| `prompt` | Text shown before user input    |
+| `cursor` | Character shown at input cursor |
 
 ### `[border]`
 
-| Key     | Description                             |
-|---------|-----------------------------------------|
-| `width` | Width of the border in pixels           |
+| Key     | Description                   |
+| ------- | ----------------------------- |
+| `width` | Width of the border in pixels |
 
 ### `[colors]`
 
-| Key                    | Description                           |
-|------------------------|---------------------------------------|
-| `background`           | Background color (e.g. `#2E3440`)     |
-| `foreground`           | Font color                            |
-| `highlight_background` | Selected item background              |
-| `highlight_foreground` | Selected item text color              |
-| `border_color`         | Window border color                   |
+| Key                    | Description                       |
+| ---------------------- | --------------------------------- |
+| `background`           | Background color (e.g. `#2E3440`) |
+| `foreground`           | Font color                        |
+| `highlight_background` | Selected item background          |
+| `highlight_foreground` | Selected item text color          |
+| `border_color`         | Window border color               |
 
 ### `[theme]`
 
 | Key    | Description                                                           |
-|--------|-----------------------------------------------------------------------|
+| ------ | --------------------------------------------------------------------- |
 | `name` | Choose a built-in theme (case-insensitive), or leave blank for custom |
 
 ---
@@ -158,6 +163,7 @@ Leave `name` empty to use `[colors]`.
 ---
 
 ## Disclaimer
+
 ChatGPT helped me refine and improve this program. While the core functionality and workflow came from my own needs, the AI assistance was invaluable for handling edge cases, improving error handling, and making the code more robust across different Linux environments, ChatGPT also assisted in writing this readme.
 
 ## License
