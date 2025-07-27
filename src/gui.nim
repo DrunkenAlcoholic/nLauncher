@@ -201,7 +201,7 @@ proc drawText*(text: string, x, y: int, isSelected: bool) =
     font,
     cint(x),
     cint(y),
-    cast[ptr FcChar8](text[0].addr),
+    cast[PFcChar8](text[0].addr),
     cint(text.len),
   )
 
