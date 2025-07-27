@@ -1,7 +1,8 @@
 # src/nim_launcher.nim
-#
-# Main entry point for the launcher. Handles config, theme, app loading, and event loop.
 
+#──────────────────────────────────────────────────────────────────────────────
+#  Imports
+#──────────────────────────────────────────────────────────────────────────────
 import
   std/[
     os, osproc, strutils, options, tables, sequtils, algorithm, parsecfg, json, times,
@@ -10,24 +11,28 @@ import
 import x11/[xlib, xutil, x, keysym]
 import ./[state, parser, gui, themes]
 
-var currentThemeIndex = 0
+#──────────────────────────────────────────────────────────────────────────────
+#  Globals
+#──────────────────────────────────────────────────────────────────────────────
+var currentThemeIndex = 0 ## Active index into built‑in `themeList`
 
-# --- Theme Management ---
-
-proc applyTheme(config: var state.Config, themeName: string) =
-  ## Applies the selected theme to the config.
-  for i, theme in themeList:
-    if theme.name.toLower == themeName.toLower:
-      config.bgColorHex = theme.bgColorHex
-      config.fgColorHex = theme.fgColorHex
-      config.highlightBgColorHex = theme.highlightBgColorHex
-      config.highlightFgColorHex = theme.highlightFgColorHex
-      config.borderColorHex = theme.borderColorHex
+#──────────────────────────────────────────────────────────────────────────────
+#  Theme helpers
+#──────────────────────────────────────────────────────────────────────────────
+proc applyTheme(config: var state.Config, name: string) =
+  ## Copy theme colours into `config` by `name` (case‑insensitive).
+  for i, th in themeList:
+    if th.name.toLower == name.toLower:
+      config.bgColorHex = th.bgColorHex
+      config.fgColorHex = th.fgColorHex
+      config.highlightBgColorHex = th.highlightBgColorHex
+      config.highlightFgColorHex = th.highlightFgColorHex
+      config.borderColorHex = th.borderColorHex
       currentThemeIndex = i
       return
 
 proc updateParsedColors(config: var state.Config) =
-  ## Parses hex color strings to Xlib pixel values.
+  ## Translate all hex strings in `config` to X11 pixel values (requires display).
   if config.bgColorHex.len == 7:
     config.bgColor = parseColor(config.bgColorHex)
   if config.fgColorHex.len == 7:
@@ -40,134 +45,115 @@ proc updateParsedColors(config: var state.Config) =
     config.borderColor = parseColor(config.borderColorHex)
 
 proc cycleTheme(config: var state.Config) =
-  ## Cycles to the next theme and updates colors.
-  currentThemeIndex = (currentThemeIndex + 1) mod len(themeList)
-  let theme = themeList[currentThemeIndex]
-  applyTheme(config, theme.name)
+  ## Rotate to next theme, refresh GUI, and flash overlay text.
+  currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
+  let th = themeList[currentThemeIndex]
+  applyTheme(config, th.name)
+
+  gui.notifyThemeChanged(th.name) # bottom‑right overlay
   updateParsedColors(config)
-  updateGuiColors()
-  redrawWindow()
+  gui.updateGuiColors()
+  gui.redrawWindow()
 
-# --- Data Loading and Caching ---
-
+#──────────────────────────────────────────────────────────────────────────────
+#  Application discovery with smart cache
+#──────────────────────────────────────────────────────────────────────────────
 proc loadApplications() =
-  ## Loads the list of applications, using a smart cache to ensure fast startups.
-
-  let totalStart = epochTime()
-
-  let homeDir = getHomeDir()
-  let usrAppDir = "/usr/share/applications"
-  let localAppDir = homeDir / ".local/share/applications"
-  let cacheDir = homeDir / ".cache" / "nim_launcher"
+  ## Build `allApps` & `filteredApps` either from cache or by scanning `.desktop`.
+  let tStart = epochTime()
+  let home = getHomeDir()
+  let usrDir = "/usr/share/applications"
+  let locDir = home / ".local/share/applications"
+  let cacheDir = home / ".cache" / "nim_launcher"
   let cacheFile = cacheDir / "apps.json"
 
-  # 1. Get the current modification times of the application source directories.
-  var currentUsrMtime = 0.0
-  if dirExists(usrAppDir):
-    currentUsrMtime = getLastModificationTime(usrAppDir).toUnixFloat()
-  var currentLocalMtime = 0.0
-  if dirExists(localAppDir):
-    currentLocalMtime = getLastModificationTime(localAppDir).toUnixFloat()
+  # Directory mtimes for invalidation
+  var usrM, locM: float
+  if dirExists(usrDir):
+    usrM = getLastModificationTime(usrDir).toUnixFloat()
+  if dirExists(locDir):
+    locM = getLastModificationTime(locDir).toUnixFloat()
 
-  # 2. Check for a valid cache file.
-  let cacheCheckStart = epochTime()
+  # Attempt cache read
   if fileExists(cacheFile):
     try:
-      let content = readFile(cacheFile)
-      let cache = to(parseJson(content), CacheData)
-
-      # Validate the cache by comparing directory modification times.
-      if cache.usrMtime == currentUsrMtime and cache.localMtime == currentLocalMtime:
-        allApps = cache.apps
+      let c = to(parseJson(readFile(cacheFile)), CacheData)
+      if c.usrMtime == usrM and c.localMtime == locM:
+        allApps = c.apps
         filteredApps = allApps
-        echo "Loaded ",
-          allApps.len, " apps from cache. (", epochTime() - cacheCheckStart, "s)"
-        echo "Total load time: ", epochTime() - totalStart, "s"
+        echo "Cache hit: ", allApps.len, " apps (", epochTime() - tStart, "s)"
         return
-    except JsonParsingError:
-      echo "Cache file corrupted (malformed JSON), re-scanning..."
-    except ValueError:
-      echo "Cache file corrupted (invalid data), re-scanning..."
+    except JsonParsingError, ValueError:
+      echo "Cache corrupt — rescan." # fall through
 
-  # 3. If cache is invalid, perform a full scan using our parser module.
-  echo "Cache invalid or missing, scanning for applications..."
-  let scanStart = epochTime()
+  # Full scan
+  echo "Scanning .desktop files …"
   var apps = initTable[string, DesktopApp]()
-  let searchPaths = [localAppDir, usrAppDir]
-
-  for basePath in searchPaths:
-    if not dirExists(basePath):
+  for dir in [locDir, usrDir]:
+    if not dirExists(dir):
       continue
-    for path in walkFiles(basePath / "*.desktop"):
-      let appOpt = parseDesktopFile(path)
-      if appOpt.isSome:
-        let newApp = appOpt.get()
-        let baseExec = getBaseExec(newApp.exec)
-
-        # De-duplicate applications based on their base command.
-        if not apps.hasKey(baseExec):
-          apps[baseExec] = newApp
-        else:
-          # Simple "best wins" logic: prefer entries that have an icon specified.
-          let existingApp = apps[baseExec]
-          if newApp.hasIcon and not existingApp.hasIcon:
-            apps[baseExec] = newApp
-  echo "Scan duration: ", epochTime() - scanStart, "s"
+    for p in walkFiles(dir / "*.desktop"):
+      let opt = parseDesktopFile(p)
+      if opt.isSome:
+        let app = opt.get()
+        let key = getBaseExec(app.exec)
+        if not apps.hasKey(key) or (app.hasIcon and not apps[key].hasIcon):
+          apps[key] = app
 
   allApps = toSeq(apps.values).sortedByIt(it.name)
   filteredApps = allApps
-  echo "Found ", allApps.len, " unique applications."
+  echo "Indexed ", allApps.len, " apps."
 
-  # 4. Write the new application list back to the cache for future runs.
-  let cacheWriteStart = epochTime()
-  let newCache =
-    CacheData(usrMtime: currentUsrMtime, localMtime: currentLocalMtime, apps: allApps)
+  # Write cache
   try:
     createDir(cacheDir)
-    writeFile(cacheFile, pretty(%newCache))
-    echo "Saved cache in ", epochTime() - cacheWriteStart, "s"
-  except:
-    echo "Warning: Failed to write cache."
+    writeFile(
+      cacheFile, pretty(%CacheData(usrMtime: usrM, localMtime: locM, apps: allApps))
+    )
+  except OSError:
+    echo "Warning: cannot save cache."
 
-  echo "Total load time: ", epochTime() - totalStart, "s"
+  echo "Scan done in ", epochTime() - tStart, "s"
 
-# --- Configuration Loading ---
-
+#──────────────────────────────────────────────────────────────────────────────
+#  Config loader (defaults + INI)
+#──────────────────────────────────────────────────────────────────────────────
 proc initLauncherConfig() =
-  ## Loads settings from the config file, creating a default one if it doesn't exist.
+  ## Populate global `config` with defaults, then override via
+  ## ~/.config/nim_launcher/config.ini (auto‑generated if absent).
 
-  # 1. Set hardcoded defaults first. These will be used if the config file
-  #    is missing or if a specific key is not present.
+  # ── 1. Hard‑coded defaults ─────────────────────────────────────────
   config.winWidth = 600
   config.lineHeight = 22
   config.maxVisibleItems = 15
   config.centerWindow = true
   config.positionX = 500
   config.positionY = 50
-  config.verticalAlign = "one-third"
+  config.verticalAlign = "one-third" # or "top", "center"
+
   config.bgColorHex = "#2E3440"
   config.fgColorHex = "#D8DEE9"
   config.highlightBgColorHex = "#88C0D0"
   config.highlightFgColorHex = "#2E3440"
   config.borderColorHex = "#4C566A"
   config.borderWidth = 2
+
   config.prompt = "> "
   config.cursor = "_"
   config.fontName = "Noto Sans:size=11"
   config.themeName = ""
 
-  # 2. Define config path and create a default file if necessary.
-  let configPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
-  if not fileExists(configPath):
-    let content =
-      """
-[window]
+  # ── 2. Ensure INI exists ───────────────────────────────────────────
+  let cfgPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
+  if not fileExists(cfgPath):
+    const tmpl =
+      """[window]
 width = 600
 max_visible_items = 15
 center = true
 position_x = 500
 position_y = 50
-vertical_align = "one-third" #usage: "one-third", "top", "center"
+vertical_align = "one-third"
 
 [font]
 fontname = Noto Sans:size=11
@@ -189,137 +175,141 @@ border_color = "#4C566A"
 [theme]
 # Leaving this empty will use the colour scheme in the [colors] section. 
 # or choose one of the inbuilt themes below to override by un-commenting.
-#name: "Nord",
-#name: "Solarized Dark"
-#name: "Solarized Light"
-#name: "Gruvbox Dark"
-#name: "Gruvbox Light"
-#name: "Dracula"
-#name: "Monokai"
-#name: "One Dark"
-#name: "Material Dark"
-#name: "Material Light"
-#name: "Cobalt"
-#name: "Ayu Dark"
-#name: "Ayu Light"
-#name: "Catppuccin Mocha"
-#name: "Catppuccin Latte"
-#name: "Catppuccin Frappe"
+#name = "Ayu Dark"
+#name = "Ayu Light"
+#name = "Catppuccin Frappe"
+#name = "Catppuccin Latte"
+#name = "Catppuccin Macchiato"
+#name = "Catppuccin Mocha"
+#name = "Cobalt"
+#name = "Dracula"
+#name = "GitHub Dark"
+#name = "GitHub Light"
+#name = "Gruvbox Dark"
+#name = "Gruvbox Light"
+#name = "Material Dark"
+#name = "Material Light"
+#name = "Monokai"
+#name = "Monokai Pro"
+#name = "Nord"
+#name = "One Dark"
+#name = "One Light"
+#name = "Palenight"
+#name = "Solarized Dark"
+#name = "Solarized Light"
+#name = "Synthwave 84"
+#name = "Tokyo Night"
+#name = "Tokyo Night Light"
 
 """
+
     try:
-      createDir(configPath.parentDir)
-      writeFile(configPath, content)
-      echo "Created default config at: ", configPath
-    except:
-      echo "Warning: Could not write default config file at ", configPath
+      createDir(cfgPath.parentDir)
+      writeFile(cfgPath, tmpl)
+      echo "Created default config at ", cfgPath
+    except OSError:
+      echo "Warning: could not write default config."
 
-  # 3. If config file exists, load it and overwrite the defaults.
-  if fileExists(configPath):
-    let cfg = loadConfig(configPath)
-    proc parseInt(section, key: string, default: int): int =
-      let valStr = cfg.getSectionValue(section, key, $default)
+  # ── 3. Parse INI ───────────────────────────────────────────────────
+  if fileExists(cfgPath):
+    let ini = loadConfig(cfgPath)
+    proc gs(sec, key, d: string): string =
+      ini.getSectionValue(sec, key, d)
+
+    proc gi(sec, key: string, d: int): int =
       try:
-        return parseInt(valStr)
+        parseInt(gs(sec, key, $d))
       except ValueError:
-        return default
+        d
 
-    config.winWidth = parseInt("window", "width", config.winWidth)
-    config.maxVisibleItems =
-      parseInt("window", "max_visible_items", config.maxVisibleItems)
+    config.winWidth = gi("window", "width", config.winWidth)
+    config.maxVisibleItems = gi("window", "max_visible_items", config.maxVisibleItems)
     config.centerWindow =
-      cfg.getSectionValue("window", "center", $config.centerWindow).toLower == "true"
-    config.positionX = parseInt("window", "position_x", config.positionX)
-    config.positionY = parseInt("window", "position_y", config.positionY)
-    config.verticalAlign =
-      cfg.getSectionValue("window", "vertical_align", config.verticalAlign)
-    config.bgColorHex = cfg.getSectionValue("colors", "background", config.bgColorHex)
-    config.fgColorHex = cfg.getSectionValue("colors", "foreground", config.fgColorHex)
-    config.highlightBgColorHex =
-      cfg.getSectionValue("colors", "highlight_background", config.highlightBgColorHex)
-    config.highlightFgColorHex =
-      cfg.getSectionValue("colors", "highlight_foreground", config.highlightFgColorHex)
-    config.borderColorHex =
-      cfg.getSectionValue("colors", "border_color", config.borderColorHex)
-    config.borderWidth = parseInt("border", "width", config.borderWidth)
-    config.prompt = cfg.getSectionValue("input", "prompt", config.prompt)
-    config.cursor = cfg.getSectionValue("input", "cursor", config.cursor)
-    config.themeName = cfg.getSectionValue("theme", "name", config.themeName)
-    config.fontName = cfg.getSectionValue("font", "fontname", config.fontName)
+      (gs("window", "center", $config.centerWindow)).toLower == "true"
+    config.positionX = gi("window", "position_x", config.positionX)
+    config.positionY = gi("window", "position_y", config.positionY)
+    config.verticalAlign = gs("window", "vertical_align", config.verticalAlign)
 
-  # --- Theme selection logic ---
+    config.bgColorHex = gs("colors", "background", config.bgColorHex)
+    config.fgColorHex = gs("colors", "foreground", config.fgColorHex)
+    config.highlightBgColorHex =
+      gs("colors", "highlight_background", config.highlightBgColorHex)
+    config.highlightFgColorHex =
+      gs("colors", "highlight_foreground", config.highlightFgColorHex)
+    config.borderColorHex = gs("colors", "border_color", config.borderColorHex)
+    config.borderWidth = gi("border", "width", config.borderWidth)
+
+    config.prompt = gs("input", "prompt", config.prompt)
+    config.cursor = gs("input", "cursor", config.cursor)
+    config.fontName = gs("font", "fontname", config.fontName)
+    config.themeName = gs("theme", "name", config.themeName)
+
+  # ── 4. Apply named theme if requested ─────────────────────────────
   if config.themeName.len > 0:
-    for theme in themeList:
-      if theme.name.toLower == config.themeName.toLower:
-        config.bgColorHex = theme.bgColorHex
-        config.fgColorHex = theme.fgColorHex
-        config.highlightBgColorHex = theme.highlightBgColorHex
-        config.highlightFgColorHex = theme.highlightFgColorHex
-        config.borderColorHex = theme.borderColorHex
-        currentThemeIndex = themeList.find(theme)
+    for th in themeList:
+      if th.name.toLower == config.themeName.toLower:
+        applyTheme(config, th.name)
         break
 
-  # 4. Calculate the final window height based on the loaded (or default) settings.
-  let inputHeight = 40
-  config.winMaxHeight = inputHeight + (config.maxVisibleItems * config.lineHeight)
+  # ── 5. Compute window height ──────────────────────────────────────
+  let inputH = 40
+  config.winMaxHeight = inputH + config.maxVisibleItems * config.lineHeight
 
   echo "Using font: ", config.fontName
 
-# --- Core Application Logic ---
-
-proc betterFuzzyMatch(query: string, target: string): bool =
-  ## Enhanced fuzzy match:
-  ##  - Allows small typos using Levenshtein distance ≤ 2
-  let q = query.toLowerAscii
-  let t = target.toLowerAscii
-
-  if q.len == 0:
+#──────────────────────────────────────────────────────────────────────────────
+#  Fuzzy match / filtering
+#──────────────────────────────────────────────────────────────────────────────
+proc betterFuzzyMatch(q, t: string): bool =
+  ## Substring → Levenshtein ≤2 → subsequence fallback.
+  let lowerQ = q.toLowerAscii
+  let lowerT = t.toLowerAscii
+  if lowerQ.len == 0:
     return true
-  if t.contains(q):
+  if lowerT.contains(lowerQ):
     return true
-  if editDistanceAscii(q, t) <= 2:
+  if editDistanceAscii(lowerQ, lowerT) <= 2:
     return true
-
-  # Optional: fallback to old subsequence style match
   var qi = 0
-  for ch in t:
-    if qi < q.len and q[qi] == ch:
-      qi += 1
-      if qi == q.len:
-        return true
-
-  return false
+  for ch in lowerT:
+    if qi < lowerQ.len and lowerQ[qi] == ch:
+      inc qi
+    if qi == lowerQ.len:
+      return true
+  false
 
 proc updateFilteredApps() =
-  ## Updates the `filteredApps` list based on the current `inputText`.
   filteredApps = allApps.filter(
-    proc(app: DesktopApp): bool =
-      betterFuzzyMatch(inputText, app.name)
+    proc(a: DesktopApp): bool =
+      betterFuzzyMatch(inputText, a.name)
   )
   selectedIndex = 0
-  viewOffset = 0 # Reset scroll on new search
+  viewOffset = 0
 
+#──────────────────────────────────────────────────────────────────────────────
+#  Launch & key handling
+#──────────────────────────────────────────────────────────────────────────────
 proc launchSelectedApp() =
-  ## Launches the currently selected application using the system shell.
-  if selectedIndex >= 0 and selectedIndex < filteredApps.len:
-    let app = filteredApps[selectedIndex]
-    let cleanExec = app.exec.split('%')[0].strip() # Remove field codes like %U
-    try:
-      echo "Launching via shell: ", cleanExec
-      discard startProcess("/bin/sh", args = ["-c", cleanExec], options = {poDaemon})
-      shouldExit = true
-    except:
-      echo "Error launching application via shell: ", cleanExec
+  ## Launch the currently selected application via /bin/sh ‑c.
+  if selectedIndex notin 0 ..< filteredApps.len:
+    return
+  let app = filteredApps[selectedIndex]
+  let cmd = app.exec.split('%')[0].strip()
+  try:
+    echo "Launching: ", cmd
+    discard startProcess("/bin/sh", args = ["-c", cmd], options = {poDaemon})
+    shouldExit = true
+  except OSError:
+    echo "Failed to launch: ", cmd
 
-# --- GUI Event Handling ---
 proc handleKeyPress(event: var XEvent) =
-  ## Processes a key press event from the X server.
-  var buffer: array[40, char]
-  var keysym: KeySym
+  ## Map X11 keysyms → launcher actions.
+  var buf: array[40, char]
+  var ks: KeySym
   discard XLookupString(
-    event.xkey.addr, cast[cstring](buffer[0].addr), cint(buffer.len), keysym.addr, nil
+    event.xkey.addr, cast[cstring](buf[0].addr), buf.len.cint, ks.addr, nil
   )
-  case keysym
+  case ks
   of XK_Escape:
     shouldExit = true
   of XK_Return:
@@ -330,44 +320,48 @@ proc handleKeyPress(event: var XEvent) =
       updateFilteredApps()
   of XK_Up:
     if selectedIndex > 0:
-      selectedIndex -= 1
+      dec selectedIndex
       if selectedIndex < viewOffset:
         viewOffset = selectedIndex
   of XK_Down:
     if selectedIndex < filteredApps.len - 1:
-      selectedIndex += 1
+      inc selectedIndex
       if selectedIndex >= viewOffset + config.maxVisibleItems:
         viewOffset = selectedIndex - config.maxVisibleItems + 1
   of XK_F5:
     cycleTheme(config)
   else:
-    if buffer[0] != '\0' and buffer[0] >= ' ':
-      inputText.add(buffer[0])
+    if buf[0] != '\0' and buf[0] >= ' ':
+      inputText.add(buf[0])
       updateFilteredApps()
 
-# --- Main Program Execution ---
+#──────────────────────────────────────────────────────────────────────────────
+#  Main event loop
+#──────────────────────────────────────────────────────────────────────────────
 proc main() =
-  ## The main entry point of the program.
   initLauncherConfig()
   loadApplications()
   initGui()
   updateParsedColors(config)
+
   while not shouldExit:
-    var event: XEvent
-    discard XNextEvent(display, event.addr)
-    case event.theType
+    var ev: XEvent
+    discard XNextEvent(display, ev.addr)
+    case ev.theType
     of Expose:
-      redrawWindow()
+      gui.redrawWindow()
     of KeyPress:
-      handleKeyPress(event)
+      handleKeyPress(ev)
       if not shouldExit:
-        redrawWindow()
+        gui.redrawWindow()
     of FocusOut:
-      echo "Focus lost. Closing."
+      echo "Focus lost — exiting"
       shouldExit = true
     else:
       discard
+
   discard XDestroyWindow(display, window)
   discard XCloseDisplay(display)
 
-main()
+when isMainModule:
+  main()

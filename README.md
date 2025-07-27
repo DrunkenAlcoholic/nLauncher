@@ -136,18 +136,33 @@ You can set the theme using:
 name = Dracula
 ```
 
-Available options:
+Available options (alphabetically):
 
-- Nord
-- Dracula
-- Gruvbox Dark / Light
-- Solarized Dark / Light
-- Catppuccin (Mocha / Latte / Frappe)
-- One Dark
-- Monokai
-- Material Dark / Light
-- Ayu Dark / Light
+- Ayu Dark
+- Ayu Light
+- Catppuccin Frappe
+- Catppuccin Latte
+- Catppuccin Macchiato
+- Catppuccin Mocha
 - Cobalt
+- Dracula
+- GitHub Dark
+- GitHub Light
+- Gruvbox Dark
+- Gruvbox Light
+- Material Dark
+- Material Light
+- Monokai
+- Monokai Pro
+- Nord
+- One Dark
+- One Light
+- Palenight
+- Solarized Dark
+- Solarized Light
+- Synthwave 84
+- Tokyo Night
+- Tokyo Night Light
 
 Leave `name` empty to use `[colors]`.
 

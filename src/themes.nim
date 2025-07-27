@@ -1,40 +1,105 @@
 # src/themes.nim
-#
-# Defines all built-in color themes for the launcher.
 
-type Theme* = object
-  name*: string
-  bgColorHex*: string
-  fgColorHex*: string
-  highlightBgColorHex*: string
-  highlightFgColorHex*: string
-  borderColorHex*: string
+#──────────────────────────────────────────────────────────────────────────────
+#  Imports
+#──────────────────────────────────────────────────────────────────────────────
+import std/strutils
 
+#──────────────────────────────────────────────────────────────────────────────
+#  Type definition
+#──────────────────────────────────────────────────────────────────────────────
+type Theme* = object ## Simple record representing one colour scheme.
+  name*: string ## Human‑readable name (unique key)
+  bgColorHex*: string ## Window background (#RRGGBB)
+  fgColorHex*: string ## Normal text colour
+  highlightBgColorHex*: string ## Selection background (active row)
+  highlightFgColorHex*: string ## Selection foreground
+  borderColorHex*: string ## Border colour
+
+#──────────────────────────────────────────────────────────────────────────────
+#  Theme catalogue
+#──────────────────────────────────────────────────────────────────────────────
 const themeList*: seq[Theme] =
   @[
     Theme(
-      name: "Nord",
-      bgColorHex: "#2E3440",
-      fgColorHex: "#D8DEE9",
-      highlightBgColorHex: "#88C0D0",
-      highlightFgColorHex: "#2E3440",
-      borderColorHex: "#4C566A",
+      name: "Ayu Dark",
+      bgColorHex: "#0F1419",
+      fgColorHex: "#BFBDB6",
+      highlightBgColorHex: "#59C2FF",
+      highlightFgColorHex: "#0F1419",
+      borderColorHex: "#1F2328",
     ),
     Theme(
-      name: "Solarized Dark",
-      bgColorHex: "#002B36",
-      fgColorHex: "#839496",
-      highlightBgColorHex: "#268BD2",
-      highlightFgColorHex: "#002B36",
-      borderColorHex: "#073642",
+      name: "Ayu Light",
+      bgColorHex: "#FAFAFA",
+      fgColorHex: "#5C6773",
+      highlightBgColorHex: "#399EE6",
+      highlightFgColorHex: "#FAFAFA",
+      borderColorHex: "#F0F0F0",
     ),
     Theme(
-      name: "Solarized Light",
-      bgColorHex: "#FDF6E3",
-      fgColorHex: "#657B83",
-      highlightBgColorHex: "#268BD2",
-      highlightFgColorHex: "#FDF6E3",
-      borderColorHex: "#EEE8D5",
+      name: "Catppuccin Frappe",
+      bgColorHex: "#303446",
+      fgColorHex: "#C6D0F5",
+      highlightBgColorHex: "#8CAAEE",
+      highlightFgColorHex: "#303446",
+      borderColorHex: "#414559",
+    ),
+    Theme(
+      name: "Catppuccin Latte",
+      bgColorHex: "#EFF1F5",
+      fgColorHex: "#4C4F69",
+      highlightBgColorHex: "#1E66F5",
+      highlightFgColorHex: "#EFF1F5",
+      borderColorHex: "#BCC0CC",
+    ),
+    Theme(
+      name: "Catppuccin Macchiato",
+      bgColorHex: "#24273A",
+      fgColorHex: "#CAD3F5",
+      highlightBgColorHex: "#8AADF4",
+      highlightFgColorHex: "#24273A",
+      borderColorHex: "#363A4F",
+    ),
+    Theme(
+      name: "Catppuccin Mocha",
+      bgColorHex: "#1E1E2E",
+      fgColorHex: "#CDD6F4",
+      highlightBgColorHex: "#89B4FA",
+      highlightFgColorHex: "#1E1E2E",
+      borderColorHex: "#313244",
+    ),
+    Theme(
+      name: "Cobalt",
+      bgColorHex: "#002240",
+      fgColorHex: "#FFFFFF",
+      highlightBgColorHex: "#007ACC",
+      highlightFgColorHex: "#002240",
+      borderColorHex: "#003366",
+    ),
+    Theme(
+      name: "Dracula",
+      bgColorHex: "#282A36",
+      fgColorHex: "#F8F8F2",
+      highlightBgColorHex: "#BD93F9",
+      highlightFgColorHex: "#282A36",
+      borderColorHex: "#44475A",
+    ),
+    Theme(
+      name: "GitHub Dark",
+      bgColorHex: "#0D1117",
+      fgColorHex: "#E6EDF3",
+      highlightBgColorHex: "#388BFD",
+      highlightFgColorHex: "#0D1117",
+      borderColorHex: "#30363D",
+    ),
+    Theme(
+      name: "GitHub Light",
+      bgColorHex: "#FFFFFF",
+      fgColorHex: "#1F2328",
+      highlightBgColorHex: "#0969DA",
+      highlightFgColorHex: "#FFFFFF",
+      borderColorHex: "#D1D9E0",
     ),
     Theme(
       name: "Gruvbox Dark",
@@ -53,30 +118,6 @@ const themeList*: seq[Theme] =
       borderColorHex: "#EBDBB2",
     ),
     Theme(
-      name: "Dracula",
-      bgColorHex: "#282A36",
-      fgColorHex: "#F8F8F2",
-      highlightBgColorHex: "#BD93F9",
-      highlightFgColorHex: "#282A36",
-      borderColorHex: "#44475A",
-    ),
-    Theme(
-      name: "Monokai",
-      bgColorHex: "#272822",
-      fgColorHex: "#F8F8F2",
-      highlightBgColorHex: "#66D9EF",
-      highlightFgColorHex: "#272822",
-      borderColorHex: "#49483E",
-    ),
-    Theme(
-      name: "One Dark",
-      bgColorHex: "#282C34",
-      fgColorHex: "#ABB2BF",
-      highlightBgColorHex: "#61AFEF",
-      highlightFgColorHex: "#282C34",
-      borderColorHex: "#3E4451",
-    ),
-    Theme(
       name: "Material Dark",
       bgColorHex: "#263238",
       fgColorHex: "#ECEFF1",
@@ -93,51 +134,101 @@ const themeList*: seq[Theme] =
       borderColorHex: "#BDBDBD",
     ),
     Theme(
-      name: "Cobalt",
-      bgColorHex: "#002240",
+      name: "Monokai",
+      bgColorHex: "#272822",
+      fgColorHex: "#F8F8F2",
+      highlightBgColorHex: "#66D9EF",
+      highlightFgColorHex: "#272822",
+      borderColorHex: "#49483E",
+    ),
+    Theme(
+      name: "Monokai Pro",
+      bgColorHex: "#2D2A2E",
+      fgColorHex: "#FCFCFA",
+      highlightBgColorHex: "#78DCE8",
+      highlightFgColorHex: "#2D2A2E",
+      borderColorHex: "#5B595C",
+    ),
+    Theme(
+      name: "Nord",
+      bgColorHex: "#2E3440",
+      fgColorHex: "#D8DEE9",
+      highlightBgColorHex: "#88C0D0",
+      highlightFgColorHex: "#2E3440",
+      borderColorHex: "#4C566A",
+    ),
+    Theme(
+      name: "One Dark",
+      bgColorHex: "#282C34",
+      fgColorHex: "#ABB2BF",
+      highlightBgColorHex: "#61AFEF",
+      highlightFgColorHex: "#282C34",
+      borderColorHex: "#3E4451",
+    ),
+    Theme(
+      name: "One Light",
+      bgColorHex: "#FAFAFA",
+      fgColorHex: "#383A42",
+      highlightBgColorHex: "#4078F2",
+      highlightFgColorHex: "#FAFAFA",
+      borderColorHex: "#E5E5E6",
+    ),
+    Theme(
+      name: "Palenight",
+      bgColorHex: "#292D3E",
+      fgColorHex: "#EEFFFF",
+      highlightBgColorHex: "#82AAFF",
+      highlightFgColorHex: "#292D3E",
+      borderColorHex: "#444267",
+    ),
+    Theme(
+      name: "Solarized Dark",
+      bgColorHex: "#002B36",
+      fgColorHex: "#839496",
+      highlightBgColorHex: "#268BD2",
+      highlightFgColorHex: "#002B36",
+      borderColorHex: "#073642",
+    ),
+    Theme(
+      name: "Solarized Light",
+      bgColorHex: "#FDF6E3",
+      fgColorHex: "#657B83",
+      highlightBgColorHex: "#268BD2",
+      highlightFgColorHex: "#FDF6E3",
+      borderColorHex: "#EEE8D5",
+    ),
+    Theme(
+      name: "Synthwave 84",
+      bgColorHex: "#2A2139",
       fgColorHex: "#FFFFFF",
-      highlightBgColorHex: "#007ACC",
-      highlightFgColorHex: "#002240",
-      borderColorHex: "#003366",
+      highlightBgColorHex: "#F92AAD",
+      highlightFgColorHex: "#2A2139",
+      borderColorHex: "#495495",
     ),
     Theme(
-      name: "Ayu Dark",
-      bgColorHex: "#0F1419",
-      fgColorHex: "#A6ACCD",
-      highlightBgColorHex: "#3A8EBA",
-      highlightFgColorHex: "#0F1419",
-      borderColorHex: "#1F2328",
+      name: "Tokyo Night",
+      bgColorHex: "#1A1B26",
+      fgColorHex: "#A9B1D6",
+      highlightBgColorHex: "#7AA2F7",
+      highlightFgColorHex: "#1A1B26",
+      borderColorHex: "#32344A",
     ),
     Theme(
-      name: "Ayu Light",
-      bgColorHex: "#FAFBFC",
-      fgColorHex: "#5C6773",
-      highlightBgColorHex: "#3A8EBA",
-      highlightFgColorHex: "#FAFBFC",
-      borderColorHex: "#E0E1E2",
-    ),
-    Theme(
-      name: "Catppuccin Mocha",
-      bgColorHex: "#1E1E2E",
-      fgColorHex: "#DDB6F2",
-      highlightBgColorHex: "#F2CDCD",
-      highlightFgColorHex: "#1E1E2E",
-      borderColorHex: "#313244",
-    ),
-    Theme(
-      name: "Catppuccin Latte",
-      bgColorHex: "#F8F8F2",
-      fgColorHex: "#4C4F69",
-      highlightBgColorHex: "#F2CDCD",
-      highlightFgColorHex: "#F8F8F2",
-      borderColorHex: "#E6E6E6",
-    ),
-    Theme(
-      name: "Catppuccin Frappe",
-      bgColorHex: "#F2E9E1",
-      fgColorHex: "#6C6A7B",
-      highlightBgColorHex: "#F2CDCD",
-      highlightFgColorHex: "#F2E9E1",
-      borderColorHex: "#E6E6E6",
+      name: "Tokyo Night Light",
+      bgColorHex: "#D5D6DB",
+      fgColorHex: "#343B58",
+      highlightBgColorHex: "#34548A",
+      highlightFgColorHex: "#D5D6DB",
+      borderColorHex: "#CBCCD1",
     ),
   ]
+
+#──────────────────────────────────────────────────────────────────────────────
+#  Utility
+#──────────────────────────────────────────────────────────────────────────────
+proc themeByName*(name: string): Theme =
+  ## Finds a theme by its name (case-insensitive).
+  for th in themeList:
+    if th.name.toLower == name.toLower:
+      return th
+  themeList[0]

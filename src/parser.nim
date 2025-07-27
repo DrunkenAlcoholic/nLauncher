@@ -2,14 +2,23 @@
 #
 # Parses .desktop files to build the application list.
 
+#──────────────────────────────────────────────────────────────────────────────
+#  Imports
+#──────────────────────────────────────────────────────────────────────────────
 import std/[os, strutils, streams, tables, options]
 import state
 
+#──────────────────────────────────────────────────────────────────────────────
+#  Exec‑line helper
+#──────────────────────────────────────────────────────────────────────────────
 proc getBaseExec*(exec: string): string =
   ## Extracts the base executable name from an Exec string.
   let cleanExec = exec.split('%')[0].strip()
   return cleanExec.split(' ')[0].extractFilename()
 
+#──────────────────────────────────────────────────────────────────────────────
+#  .desktop file parser
+#──────────────────────────────────────────────────────────────────────────────
 proc getBestValue*(entries: Table[string, string], baseKey: string): string =
   ## Selects the best value for a key, handling localization.
   if entries.hasKey(baseKey):
