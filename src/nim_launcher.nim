@@ -8,6 +8,7 @@ import
     os, osproc, strutils, options, tables, sequtils, algorithm, parsecfg, json, times,
     editdistance,
   ]
+from std/uri import encodeUrl
 import x11/[xlib, xutil, x, keysym]
 import ./[state, parser, gui, themes]
 
@@ -15,6 +16,47 @@ import ./[state, parser, gui, themes]
 #  Globals
 #──────────────────────────────────────────────────────────────────────────────
 var currentThemeIndex = 0 ## Active index into built‑in `themeList`
+
+#──────────────────────────────────────────────────────────────────────────────
+# Proc helpers
+#──────────────────────────────────────────────────────────────────────────────
+proc exeExists(exe: string): bool =
+  ## True if `exe` is runnable. Handles absolute paths and plain names.
+  var ex = exe
+  # strip wrapping quotes
+  if (ex.len >= 2) and (ex[0] in {'"', '\''}) and (ex[^1] == ex[0]): ex = ex[1 ..< ^1]
+
+  # absolute / relative path with '/' ➜ check directly
+  if ex.contains('/'): return fileExists(ex)
+
+  # search PATH
+  for dir in getEnv("PATH", "").split(':'):
+    if fileExists(dir / ex): return true
+  false
+
+proc runShell(cmd: string) =
+  ## Executes `cmd` in a terminal if one is available; otherwise via plain shell.
+  let term = config.terminalExe
+  if term.len > 0 and exeExists(term):
+    echo "Using terminal: ", term
+    discard startProcess(term, args = ["-e", "sh", "-c", cmd], options = {poDaemon})
+  else:
+    # No terminal found—run non‑interactive command in background shell
+    echo "No terminal found, running command in background shell: ", term
+    discard startProcess("/bin/sh", args = ["-c", cmd], options = {poDaemon})
+
+proc openUrl(url: string) =
+  ## Launch default browser with xdg‑open.
+  runShell("xdg-open '" & url & "' &")
+
+proc scanConfigFiles*(query: string): seq[DesktopApp] =
+  ## Return config files under ~/.config whose filename contains the query.
+  let cfgDir = getHomeDir() / ".config"
+  for path in walkDirRec(cfgDir):
+    if fileExists(path) and path.extractFilename.toLower.contains(query.toLower):
+      result.add DesktopApp(
+        name: path.extractFilename, exec: "xdg-open '" & path & "'", hasIcon: false
+      )
 
 #──────────────────────────────────────────────────────────────────────────────
 #  Theme helpers
@@ -142,6 +184,7 @@ proc initLauncherConfig() =
   config.cursor = "_"
   config.fontName = "Noto Sans:size=11"
   config.themeName = ""
+  config.terminalExe = "gnome-terminal" # default terminal program
 
   # ── 2. Ensure INI exists ───────────────────────────────────────────
   let cfgPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
@@ -161,6 +204,9 @@ fontname = Noto Sans:size=11
 [input]
 prompt = "> "
 cursor = "_"
+
+[terminal]
+program = "gnome-terminal"
 
 [border]
 width = 2
@@ -243,6 +289,8 @@ border_color = "#4C566A"
     config.cursor = gs("input", "cursor", config.cursor)
     config.fontName = gs("font", "fontname", config.fontName)
     config.themeName = gs("theme", "name", config.themeName)
+    config.terminalExe = gs("terminal", "program", "")
+    config.terminalExe = config.terminalExe.strip(chars = {'"', '\''})
 
   # ── 4. Apply named theme if requested ─────────────────────────────
   if config.themeName.len > 0:
@@ -279,10 +327,49 @@ proc betterFuzzyMatch(q, t: string): bool =
   false
 
 proc updateFilteredApps() =
-  filteredApps = allApps.filter(
-    proc(a: DesktopApp): bool =
-      betterFuzzyMatch(inputText, a.name)
-  )
+  ## Updates `filteredApps` based on current `inputText` and selected input mode.
+
+  # ----- 1. Detect input mode from leading prefix -----
+  if inputText.startsWith("/c "):
+    inputMode = imConfigSearch # config file search
+  elif inputText.startsWith("/y "):
+    inputMode = imYouTube # YouTube search
+  elif inputText.startsWith("/g "):
+    inputMode = imGoogle # Google search
+  elif inputText.startsWith("/") and inputText.len > 1:
+    inputMode = imRunCommand # direct shell command
+  else:
+    inputMode = imNormal # normal application search
+
+  # ----- 2. Populate filteredApps according to active mode -----
+  case inputMode
+  of imNormal:
+    filteredApps = allApps.filterIt(betterFuzzyMatch(inputText, it.name))
+  of imRunCommand:
+    # Show a single synthetic entry indicating the command to run
+    filteredApps =
+      @[
+        DesktopApp(
+          name: "Run: " & inputText[1 ..^ 1].strip(),
+          exec: inputText[1 ..^ 1].strip(),
+          hasIcon: false,
+        )
+      ]
+  of imConfigSearch:
+    let query = inputText[3 ..^ 1].strip()
+    filteredApps = scanConfigFiles(query) # returns a seq[DesktopApp]
+  of imYouTube:
+    let query = inputText[3 ..^ 1].strip()
+    let url = "https://www.youtube.com/results?search_query=" & encodeUrl(query)
+    filteredApps =
+      @[DesktopApp(name: "Search YouTube: " & query, exec: url, hasIcon: false)]
+  of imGoogle:
+    let query = inputText[2 ..^ 1].strip()
+    let url = "https://www.google.com/search?q=" & encodeUrl(query)
+    filteredApps =
+      @[DesktopApp(name: "Search Google: " & query, exec: url, hasIcon: false)]
+
+  # ----- 3. Reset selection & scroll -----
   selectedIndex = 0
   viewOffset = 0
 
@@ -290,17 +377,27 @@ proc updateFilteredApps() =
 #  Launch & key handling
 #──────────────────────────────────────────────────────────────────────────────
 proc launchSelectedApp() =
-  ## Launch the currently selected application via /bin/sh ‑c.
+  if inputMode == imRunCommand:
+    let cmd = inputText[1 ..^ 1].strip()
+    echo "DEBUG: executing -> ", cmd
+    if cmd.len > 0:
+      runShell(cmd)
+    shouldExit = true
+    return
+
   if selectedIndex notin 0 ..< filteredApps.len:
     return
   let app = filteredApps[selectedIndex]
-  let cmd = app.exec.split('%')[0].strip()
-  try:
-    echo "Launching: ", cmd
-    discard startProcess("/bin/sh", args = ["-c", cmd], options = {poDaemon})
-    shouldExit = true
-  except OSError:
-    echo "Failed to launch: ", cmd
+
+  case inputMode
+  of imYouTube, imGoogle:
+    openUrl(app.exec)
+  elif inputMode == imConfigSearch:
+    runShell(app.exec) # xdg‑open config file
+  else: # imNormal
+    let cleanExec = app.exec.split('%')[0].strip()
+    runShell(cleanExec)
+  shouldExit = true
 
 proc handleKeyPress(event: var XEvent) =
   ## Map X11 keysyms → launcher actions.

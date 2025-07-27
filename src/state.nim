@@ -44,6 +44,9 @@ type Config* = object
   prompt*, cursor*: string
   fontName*: string
 
+  # — Terminal —
+  terminalExe*: string ## path to program icon (if any)
+
   # — Theme selection —
   themeName*: string ## empty ⇒ custom colours
 
@@ -51,6 +54,13 @@ type Config* = object
   bgColor*, fgColor*: culong
   highlightBgColor*, highlightFgColor*: culong
   borderColor*: culong
+
+type InputMode* = enum ## Current interpretation of user input
+  imNormal # regular fuzzy‑app search
+  imRunCommand # `/...`
+  imConfigSearch # `/c ...`
+  imYouTube # `/y ...`
+  imGoogle # `/g ...`
 
 #──────────────────────────────────────────────────────────────────────────────
 #  Global singletons (mutable)  — accessed from gui & launcher
@@ -77,3 +87,6 @@ var
 
   ## Control flag --------------------------------------------------
   shouldExit*: bool = false ## set to true → main loop quits
+
+  ## Input mode ---------------------------------------------------
+  inputMode*: InputMode = imNormal ## current interpretation of user input
