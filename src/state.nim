@@ -47,6 +47,7 @@ type
     imConfigSearch # "/c <query>"
     imYouTube # "/y <query>"
     imGoogle # "/g <query>"
+    imWiki # "/w <query>"
 
 # ── X11 handles (initialised in gui.initGui) ────────────────────────────
 var

@@ -44,8 +44,11 @@ proc runShell(cmd: string) =
     discard startProcess("/bin/sh", args = ["-c", cmd], options = {poDaemon})
 
 proc openUrl(url: string) =
-  ## Launch default browser with xdg‑open.
-  runShell("xdg-open '" & url & "' &")
+  ## Launch default browser directly (no terminal).
+  discard startProcess("/bin/sh",
+    args = ["-c", "xdg-open \"" & url & "\" &"],
+    options = {poDaemon})
+
 
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return config files under ~/.config whose filename contains the query.
@@ -164,48 +167,52 @@ proc initLauncherConfig() =
   ## ~/.config/nim_launcher/config.ini  (created automatically).
 
   # ── 1. Built‑in defaults ───────────────────────────────────────────
-  config.winWidth            = 600
+  config.winWidth            = 500
   config.lineHeight          = 22
-  config.maxVisibleItems     = 15
+  config.maxVisibleItems     = 10
   config.centerWindow        = true
-  config.positionX           = 500
+  config.positionX           = 20
   config.positionY           = 50
   config.verticalAlign       = "one-third"
+
+  config.fontName            = "Noto Sans:size=12"
+
+  config.prompt              = "> "
+  config.cursor              = "_"
+
+  config.terminalExe         = "gnome-terminal"
 
   config.bgColorHex          = "#2E3440"
   config.fgColorHex          = "#D8DEE9"
   config.highlightBgColorHex = "#88C0D0"
   config.highlightFgColorHex = "#2E3440"
-  config.borderColorHex      = "#4C566A"
+  config.borderColorHex      = "#8BE9FD"
   config.borderWidth         = 2
 
-  config.prompt              = "> "
-  config.cursor              = "_"
-  config.fontName            = "Noto Sans:size=11"
   config.themeName           = ""
-  config.terminalExe         = "gnome-terminal"
+  
 
   # ── 2. Ensure INI file exists ──────────────────────────────────────
   let cfgPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
   if not fileExists(cfgPath):
     const iniTemplate = """
 [window]
-width              = 600
-max_visible_items  = 15
+width              = 500
+max_visible_items  = 10
 center             = true
-position_x         = 500
+position_x         = 20
 position_y         = 50
 vertical_align     = "one-third"
 
 [font]
-fontname = Noto Sans:size=11
+fontname = Noto Sans:size=12
 
 [input]
 prompt   = "> "
 cursor   = "_"
 
 [terminal]
-program  = "gnome-terminal"
+program  = gnome-terminal
 
 [border]
 width    = 2
@@ -215,10 +222,37 @@ background           = "#2E3440"
 foreground           = "#D8DEE9"
 highlight_background = "#88C0D0"
 highlight_foreground = "#2E3440"
-border_color         = "#4C566A"
+border_color         = "#8BE9FD"
 
 [theme]
+# Leaving this empty will use the colour scheme in the [colors] section. 
+# or choose one of the inbuilt themes below to override by un-commenting.
+#name = "Ayu Dark"
+#name = "Ayu Light"
+#name = "Catppuccin Frappe"
+#name = "Catppuccin Latte"
+#name = "Catppuccin Macchiato"
+#name = "Catppuccin Mocha"
+#name = "Cobalt"
+#name = "Dracula"
+#name = "GitHub Dark"
+#name = "GitHub Light"
+#name = "Gruvbox Dark"
+#name = "Gruvbox Light"
+#name = "Material Dark"
+#name = "Material Light"
+#name = "Monokai"
+#name = "Monokai Pro"
 #name = "Nord"
+#name = "One Dark"
+#name = "One Light"
+#name = "Palenight"
+#name = "Solarized Dark"
+#name = "Solarized Light"
+#name = "Synthwave 84"
+#name = "Tokyo Night"
+#name = "Tokyo Night Light"
+
 """
     createDir(cfgPath.parentDir)
     writeFile(cfgPath, iniTemplate)
@@ -311,6 +345,8 @@ proc updateFilteredApps() =
     inputMode = imYouTube               # YouTube search
   elif inputText.startsWith("/g "):
     inputMode = imGoogle                # Google search
+  elif inputText.startsWith("/w "):
+    inputMode = imWiki               # Wiki search
   elif inputText.startsWith("/") and inputText.len > 1:
     inputMode = imRunCommand            # direct shell command
   else:
@@ -365,6 +401,12 @@ proc updateFilteredApps() =
                                 exec: url,
                                 hasIcon: false)]
 
+  of imWiki:
+    let query = inputText[3 .. ^1].strip()
+    let url   = "https://en.wikipedia.org/wiki/Special:Search?search=" & encodeUrl(query)
+    filteredApps = @[DesktopApp(name: "Search Google: " & query,
+                                exec: url,
+                                hasIcon: false)]
 
   # ── 3. Reset selection & scroll ────────────────────────────────────
   selectedIndex = 0
@@ -392,7 +434,7 @@ proc launchSelectedApp() =
 
   # 3. Mode‑specific launches ----------------------------------------------
   case inputMode
-  of imYouTube, imGoogle:
+  of imYouTube, imGoogle, imWiki:
     openUrl(app.exec)                          # browser URL
 
   of imConfigSearch:
