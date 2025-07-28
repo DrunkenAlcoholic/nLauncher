@@ -1,24 +1,25 @@
 # src/themes.nim
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Imports
-#──────────────────────────────────────────────────────────────────────────────
-import std/strutils
+## themes.nim — catalogue of built‑in colour schemes
+## GNU GPL v3 (or later); see LICENSE.
+##
+## This module is data‑only: it exposes a list of `Theme` records and a tiny
+## lookup helper.  No side effects.
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Type definition
-#──────────────────────────────────────────────────────────────────────────────
-type Theme* = object ## Simple record representing one colour scheme.
-  name*: string ## Human‑readable name (unique key)
-  bgColorHex*: string ## Window background (#RRGGBB)
-  fgColorHex*: string ## Normal text colour
-  highlightBgColorHex*: string ## Selection background (active row)
-  highlightFgColorHex*: string ## Selection foreground
-  borderColorHex*: string ## Border colour
+# ── Imports ─────────────────────────────────────────────────────────────
+import std/strutils           ## `toLower`
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Theme catalogue
-#──────────────────────────────────────────────────────────────────────────────
+# ── Type definitions ────────────────────────────────────────────────────
+type
+  Theme* = object              ## One complete colour scheme.
+    name*: string
+    bgColorHex*: string
+    fgColorHex*: string
+    highlightBgColorHex*: string
+    highlightFgColorHex*: string
+    borderColorHex*: string
+
+# ── Theme catalogue ─────────────────────────────────────────────────────
 const themeList*: seq[Theme] =
   @[
     Theme(
@@ -223,9 +224,7 @@ const themeList*: seq[Theme] =
     ),
   ]
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Utility
-#──────────────────────────────────────────────────────────────────────────────
+# ── Helpers ─────────────────────────────────────────────────────────────
 proc themeByName*(name: string): Theme =
   ## Finds a theme by its name (case-insensitive).
   for th in themeList:
