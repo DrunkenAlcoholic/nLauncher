@@ -20,19 +20,15 @@ var currentThemeIndex = 0 ## Active index into built‑in `themeList`
 #──────────────────────────────────────────────────────────────────────────────
 # Proc helpers
 #──────────────────────────────────────────────────────────────────────────────
-proc exeExists(exe: string): bool =
-  ## True if `exe` is runnable. Handles absolute paths and plain names.
-  var ex = exe
-  # strip wrapping quotes
-  if (ex.len >= 2) and (ex[0] in {'"', '\''}) and (ex[^1] == ex[0]): ex = ex[1 ..< ^1]
-
-  # absolute / relative path with '/' ➜ check directly
-  if ex.contains('/'): return fileExists(ex)
-
-  # search PATH
-  for dir in getEnv("PATH", "").split(':'):
-    if fileExists(dir / ex): return true
-  false
+proc runCommand(cmd: string) =
+  ## Spawn a terminal -e sh -c "cmd" ; fall back to sh -c in background.
+  let term = chooseTerminal()
+  if term.len > 0:
+    echo "Running in terminal: ", term, "  -e ", cmd
+    discard startProcess(term, args = ["-e", "sh", "-c", cmd], options = {poDaemon})
+  else:
+    echo "No terminal found; running cmd headless"
+    discard startProcess("/bin/sh", args = ["-c", cmd], options = {poDaemon})
 
 proc runShell(cmd: string) =
   ## Executes `cmd` in a terminal if one is available; otherwise via plain shell.
@@ -109,26 +105,33 @@ proc loadApplications() =
   let cacheDir = home / ".cache" / "nim_launcher"
   let cacheFile = cacheDir / "apps.json"
 
-  # Directory mtimes for invalidation
-  var usrM, locM: float
-  if dirExists(usrDir):
-    usrM = getLastModificationTime(usrDir).toUnixFloat()
-  if dirExists(locDir):
-    locM = getLastModificationTime(locDir).toUnixFloat()
+  # ── 1. Current mtimes (integer seconds) ───────────────────────────────
+  let usrM: int64 =
+    if dirExists(usrDir):
+      getLastModificationTime(usrDir).toUnix
+    else:
+      0'i64
+  let locM: int64 =
+    if dirExists(locDir):
+      getLastModificationTime(locDir).toUnix
+    else:
+      0'i64
 
-  # Attempt cache read
+  # ── 2. Try to load cache if the file exists ───────────────────────────
   if fileExists(cacheFile):
     try:
       let c = to(parseJson(readFile(cacheFile)), CacheData)
+      #echo "DEBUG cache usrM=", c.usrMtime, " locM=", c.localMtime
+      #echo "DEBUG new   usrM=", usrM, " locM=", locM
       if c.usrMtime == usrM and c.localMtime == locM:
         allApps = c.apps
         filteredApps = allApps
         echo "Cache hit: ", allApps.len, " apps (", epochTime() - tStart, "s)"
-        return
-    except JsonParsingError, ValueError:
-      echo "Cache corrupt — rescan." # fall through
+        return # early exit on valid cache
+    except JsonParsingError, ValueError, IOError:
+      echo "Cache missing/corrupt — rescan."
 
-  # Full scan
+  # ── 3. Full scan (cache miss) ─────────────────────────────────────────
   echo "Scanning .desktop files …"
   var apps = initTable[string, DesktopApp]()
   for dir in [locDir, usrDir]:
@@ -146,7 +149,7 @@ proc loadApplications() =
   filteredApps = allApps
   echo "Indexed ", allApps.len, " apps."
 
-  # Write cache
+  # ── 4. Write new cache ────────────────────────────────────────────────
   try:
     createDir(cacheDir)
     writeFile(
@@ -377,26 +380,34 @@ proc updateFilteredApps() =
 #  Launch & key handling
 #──────────────────────────────────────────────────────────────────────────────
 proc launchSelectedApp() =
+  ## Execute whatever is currently selected / typed, depending on inputMode.
+
+  # ── 1.  Direct “/command …” trigger ───────────────────────────────
   if inputMode == imRunCommand:
-    let cmd = inputText[1 ..^ 1].strip()
+    let cmd = inputText[1 .. ^1].strip()      # drop leading '/'
     echo "DEBUG: executing -> ", cmd
     if cmd.len > 0:
-      runShell(cmd)
+      runCommand(cmd)                         # open in terminal or headless
     shouldExit = true
     return
 
+  # ── 2.  Guard against empty list selections ───────────────────────
   if selectedIndex notin 0 ..< filteredApps.len:
     return
   let app = filteredApps[selectedIndex]
 
+  # ── 3.  Mode‑specific launches ────────────────────────────────────
   case inputMode
   of imYouTube, imGoogle:
-    openUrl(app.exec)
-  elif inputMode == imConfigSearch:
-    runShell(app.exec) # xdg‑open config file
-  else: # imNormal
+    openUrl(app.exec)                         # browser search URL
+
+  of imConfigSearch:
+    runCommand(app.exec)                      # xdg-open <file> inside terminal
+
+  else:                                       # imNormal (application launch)
     let cleanExec = app.exec.split('%')[0].strip()
-    runShell(cleanExec)
+    runCommand(cleanExec)                     # launch app via shell/terminal
+
   shouldExit = true
 
 proc handleKeyPress(event: var XEvent) =
@@ -439,6 +450,10 @@ proc main() =
   initLauncherConfig()
   loadApplications()
   initGui()
+  # check if benchmark parameter has been passed
+  if "--bench" in commandLineParams():
+    redrawWindow() # draw one frame so compositor records a surface
+    quit 0
   updateParsedColors(config)
 
   while not shouldExit:

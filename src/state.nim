@@ -4,6 +4,7 @@
 #  Imports
 #──────────────────────────────────────────────────────────────────────────────
 import x11/[xlib, x] ## for PDisplay, Window, GC, culong, etc.
+import std/[os, strutils]
 
 #──────────────────────────────────────────────────────────────────────────────
 #  Application & cache records
@@ -16,8 +17,8 @@ type
     hasIcon*: bool ## True if Icon= present in the file
 
   CacheData* = object ## JSON‑serialised on disk for fast start‑up.
-    usrMtime*: float ## mtime of /usr/share/applications
-    localMtime*: float ## mtime of ~/.local/share/applications
+    usrMtime*: int64 ## mtime of /usr/share/applications
+    localMtime*: int64 ## mtime of ~/.local/share/applications
     apps*: seq[DesktopApp] ## De‑duplicated application list
 
 #──────────────────────────────────────────────────────────────────────────────
@@ -90,3 +91,58 @@ var
 
   ## Input mode ---------------------------------------------------
   inputMode*: InputMode = imNormal ## current interpretation of user input
+
+const fallbackTerms* = [
+  "kitty", "alacritty", "wezterm", "foot", "gnome-terminal", "konsole",
+  "xfce4-terminal", "xterm",
+]
+
+proc exeExists*(exe: string): bool =
+  ## True if `exe` is runnable (accepts absolute path too)
+  var e = exe.strip(chars = {'"', '\''})
+  if e.contains('/'): # absolute or relative path
+    return fileExists(e)
+  for d in getEnv("PATH", "").split(':'):
+    if fileExists(d / e):
+      return true
+  false
+
+proc findExe(exe: string): string =
+  ## Return absolute path if exe is found in PATH, else "".
+  for dir in getEnv("PATH", "").split(':'):
+    let p = dir / exe
+    if fileExists(p):
+      return p
+  result = "" # not found
+
+proc chooseTerminal*(): string =
+  ## Returns absolute path of the first usable terminal.
+  # 1) config file
+  if config.terminalExe.len > 0:
+    let cfg = config.terminalExe.strip(chars = {'"', '\''})
+    if cfg.contains('/'): # absolute path given
+      if fileExists(cfg):
+        return cfg
+    else:
+      let f = findExe(cfg)
+      if f.len > 0:
+        return f
+
+  # 2) $TERMINAL
+  let envTerm = getEnv("TERMINAL", "")
+  if envTerm.len > 0:
+    if envTerm.contains('/'): # absolute
+      if fileExists(envTerm):
+        return envTerm
+    else:
+      let f = findExe(envTerm)
+      if f.len > 0:
+        return f
+
+  # 3) fallbacks
+  for t in fallbackTerms:
+    let p = findExe(t)
+    if p.len > 0:
+      return p
+
+  return "" # none found
