@@ -6,11 +6,11 @@
 import
   std/[
     os, osproc, strutils, options, tables, sequtils, algorithm, parsecfg, json, times,
-    editdistance,
+    editdistance, sets,
   ]
 from std/uri import encodeUrl
 import x11/[xlib, xutil, x, keysym]
-import ./[state, parser, gui, themes]
+import ./[state, parser, gui, themes, utils]
 
 #──────────────────────────────────────────────────────────────────────────────
 #  Globals
@@ -21,13 +21,15 @@ var currentThemeIndex = 0 ## Active index into built‑in `themeList`
 # Proc helpers
 #──────────────────────────────────────────────────────────────────────────────
 proc runCommand(cmd: string) =
-  ## Spawn a terminal -e sh -c "cmd" ; fall back to sh -c in background.
+  ## Run `cmd` inside the chosen terminal (if any), else headless.
   let term = chooseTerminal()
   if term.len > 0:
-    echo "Running in terminal: ", term, "  -e ", cmd
-    discard startProcess(term, args = ["-e", "sh", "-c", cmd], options = {poDaemon})
+    echo "Running in terminal: ", term, " -e ", cmd
+    discard startProcess("/usr/bin/env",
+                         args   = [term, "-e", "sh", "-c", cmd],
+                         options = {poDaemon})
   else:
-    echo "No terminal found; running cmd headless"
+    echo "No terminal found; running headless"
     discard startProcess("/bin/sh", args = ["-c", cmd], options = {poDaemon})
 
 proc runShell(cmd: string) =
@@ -58,7 +60,6 @@ proc scanConfigFiles*(query: string): seq[DesktopApp] =
 #  Theme helpers
 #──────────────────────────────────────────────────────────────────────────────
 proc applyTheme(config: var state.Config, name: string) =
-  ## Copy theme colours into `config` by `name` (case‑insensitive).
   for i, th in themeList:
     if th.name.toLower == name.toLower:
       config.bgColorHex = th.bgColorHex
@@ -70,7 +71,7 @@ proc applyTheme(config: var state.Config, name: string) =
       return
 
 proc updateParsedColors(config: var state.Config) =
-  ## Translate all hex strings in `config` to X11 pixel values (requires display).
+  ## Convert hex → X pixel (needs X connection).
   if config.bgColorHex.len == 7:
     config.bgColor = parseColor(config.bgColorHex)
   if config.fgColorHex.len == 7:
@@ -83,12 +84,10 @@ proc updateParsedColors(config: var state.Config) =
     config.borderColor = parseColor(config.borderColorHex)
 
 proc cycleTheme(config: var state.Config) =
-  ## Rotate to next theme, refresh GUI, and flash overlay text.
   currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
   let th = themeList[currentThemeIndex]
   applyTheme(config, th.name)
-
-  gui.notifyThemeChanged(th.name) # bottom‑right overlay
+  gui.notifyThemeChanged(th.name)
   updateParsedColors(config)
   gui.updateGuiColors()
   gui.redrawWindow()
@@ -97,7 +96,6 @@ proc cycleTheme(config: var state.Config) =
 #  Application discovery with smart cache
 #──────────────────────────────────────────────────────────────────────────────
 proc loadApplications() =
-  ## Build `allApps` & `filteredApps` either from cache or by scanning `.desktop`.
   let tStart = epochTime()
   let home = getHomeDir()
   let usrDir = "/usr/share/applications"
@@ -105,7 +103,7 @@ proc loadApplications() =
   let cacheDir = home / ".cache" / "nim_launcher"
   let cacheFile = cacheDir / "apps.json"
 
-  # ── 1. Current mtimes (integer seconds) ───────────────────────────────
+  # 1. mtime stamps
   let usrM: int64 =
     if dirExists(usrDir):
       getLastModificationTime(usrDir).toUnix
@@ -117,21 +115,19 @@ proc loadApplications() =
     else:
       0'i64
 
-  # ── 2. Try to load cache if the file exists ───────────────────────────
+  # 2. cache hit?
   if fileExists(cacheFile):
     try:
       let c = to(parseJson(readFile(cacheFile)), CacheData)
-      #echo "DEBUG cache usrM=", c.usrMtime, " locM=", c.localMtime
-      #echo "DEBUG new   usrM=", usrM, " locM=", locM
       if c.usrMtime == usrM and c.localMtime == locM:
         allApps = c.apps
         filteredApps = allApps
         echo "Cache hit: ", allApps.len, " apps (", epochTime() - tStart, "s)"
-        return # early exit on valid cache
+        return
     except JsonParsingError, ValueError, IOError:
       echo "Cache missing/corrupt — rescan."
 
-  # ── 3. Full scan (cache miss) ─────────────────────────────────────────
+  # 3. scan *.desktop
   echo "Scanning .desktop files …"
   var apps = initTable[string, DesktopApp]()
   for dir in [locDir, usrDir]:
@@ -149,7 +145,7 @@ proc loadApplications() =
   filteredApps = allApps
   echo "Indexed ", allApps.len, " apps."
 
-  # ── 4. Write new cache ────────────────────────────────────────────────
+  # 4. write cache
   try:
     createDir(cacheDir)
     writeFile(
@@ -161,152 +157,128 @@ proc loadApplications() =
   echo "Scan done in ", epochTime() - tStart, "s"
 
 #──────────────────────────────────────────────────────────────────────────────
-#  Config loader (defaults + INI)
+#  initLauncherConfig  – defaults → INI override → derived values
 #──────────────────────────────────────────────────────────────────────────────
 proc initLauncherConfig() =
-  ## Populate global `config` with defaults, then override via
-  ## ~/.config/nim_launcher/config.ini (auto‑generated if absent).
+  ## Populate `config` with defaults, then override them from
+  ## ~/.config/nim_launcher/config.ini  (created automatically).
 
-  # ── 1. Hard‑coded defaults ─────────────────────────────────────────
-  config.winWidth = 600
-  config.lineHeight = 22
-  config.maxVisibleItems = 15
-  config.centerWindow = true
-  config.positionX = 500
-  config.positionY = 50
-  config.verticalAlign = "one-third" # or "top", "center"
+  # ── 1. Built‑in defaults ───────────────────────────────────────────
+  config.winWidth            = 600
+  config.lineHeight          = 22
+  config.maxVisibleItems     = 15
+  config.centerWindow        = true
+  config.positionX           = 500
+  config.positionY           = 50
+  config.verticalAlign       = "one-third"
 
-  config.bgColorHex = "#2E3440"
-  config.fgColorHex = "#D8DEE9"
+  config.bgColorHex          = "#2E3440"
+  config.fgColorHex          = "#D8DEE9"
   config.highlightBgColorHex = "#88C0D0"
   config.highlightFgColorHex = "#2E3440"
-  config.borderColorHex = "#4C566A"
-  config.borderWidth = 2
+  config.borderColorHex      = "#4C566A"
+  config.borderWidth         = 2
 
-  config.prompt = "> "
-  config.cursor = "_"
-  config.fontName = "Noto Sans:size=11"
-  config.themeName = ""
-  config.terminalExe = "gnome-terminal" # default terminal program
+  config.prompt              = "> "
+  config.cursor              = "_"
+  config.fontName            = "Noto Sans:size=11"
+  config.themeName           = ""
+  config.terminalExe         = "gnome-terminal"
 
-  # ── 2. Ensure INI exists ───────────────────────────────────────────
+  # ── 2. Ensure INI file exists ──────────────────────────────────────
   let cfgPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
   if not fileExists(cfgPath):
-    const tmpl =
-      """[window]
-width = 600
-max_visible_items = 15
-center = true
-position_x = 500
-position_y = 50
-vertical_align = "one-third"
+    const iniTemplate = """
+[window]
+width              = 600
+max_visible_items  = 15
+center             = true
+position_x         = 500
+position_y         = 50
+vertical_align     = "one-third"
 
 [font]
 fontname = Noto Sans:size=11
 
 [input]
-prompt = "> "
-cursor = "_"
+prompt   = "> "
+cursor   = "_"
 
 [terminal]
-program = "gnome-terminal"
+program  = "gnome-terminal"
 
 [border]
-width = 2
+width    = 2
 
 [colors]
-background = "#2E3440"
-foreground = "#D8DEE9"
+background           = "#2E3440"
+foreground           = "#D8DEE9"
 highlight_background = "#88C0D0"
 highlight_foreground = "#2E3440"
-border_color = "#4C566A"
+border_color         = "#4C566A"
 
 [theme]
-# Leaving this empty will use the colour scheme in the [colors] section. 
-# or choose one of the inbuilt themes below to override by un-commenting.
-#name = "Ayu Dark"
-#name = "Ayu Light"
-#name = "Catppuccin Frappe"
-#name = "Catppuccin Latte"
-#name = "Catppuccin Macchiato"
-#name = "Catppuccin Mocha"
-#name = "Cobalt"
-#name = "Dracula"
-#name = "GitHub Dark"
-#name = "GitHub Light"
-#name = "Gruvbox Dark"
-#name = "Gruvbox Light"
-#name = "Material Dark"
-#name = "Material Light"
-#name = "Monokai"
-#name = "Monokai Pro"
 #name = "Nord"
-#name = "One Dark"
-#name = "One Light"
-#name = "Palenight"
-#name = "Solarized Dark"
-#name = "Solarized Light"
-#name = "Synthwave 84"
-#name = "Tokyo Night"
-#name = "Tokyo Night Light"
-
 """
-
-    try:
-      createDir(cfgPath.parentDir)
-      writeFile(cfgPath, tmpl)
-      echo "Created default config at ", cfgPath
-    except OSError:
-      echo "Warning: could not write default config."
+    createDir(cfgPath.parentDir)
+    writeFile(cfgPath, iniTemplate)
+    echo "Created default config at ", cfgPath
 
   # ── 3. Parse INI ───────────────────────────────────────────────────
-  if fileExists(cfgPath):
-    let ini = loadConfig(cfgPath)
-    proc gs(sec, key, d: string): string =
-      ini.getSectionValue(sec, key, d)
+  let ini = loadConfig(cfgPath)
 
-    proc gi(sec, key: string, d: int): int =
-      try:
-        parseInt(gs(sec, key, $d))
-      except ValueError:
-        d
+  for sec, table in ini:
+    for key, val in table:
+      if sec == "window":
+        case key
+        of "width":              config.winWidth        = val.parseInt
+        of "max_visible_items":  config.maxVisibleItems = val.parseInt
+        of "center":             config.centerWindow    = (val.toLower == "true")
+        of "position_x":         config.positionX       = val.parseInt
+        of "position_y":         config.positionY       = val.parseInt
+        of "vertical_align":     config.verticalAlign   = val
+        else: discard
 
-    config.winWidth = gi("window", "width", config.winWidth)
-    config.maxVisibleItems = gi("window", "max_visible_items", config.maxVisibleItems)
-    config.centerWindow =
-      (gs("window", "center", $config.centerWindow)).toLower == "true"
-    config.positionX = gi("window", "position_x", config.positionX)
-    config.positionY = gi("window", "position_y", config.positionY)
-    config.verticalAlign = gs("window", "vertical_align", config.verticalAlign)
+      elif sec == "colors":
+        case key
+        of "background":           config.bgColorHex          = val
+        of "foreground":           config.fgColorHex          = val
+        of "highlight_background": config.highlightBgColorHex = val
+        of "highlight_foreground": config.highlightFgColorHex = val
+        of "border_color":         config.borderColorHex      = val
+        else: discard
 
-    config.bgColorHex = gs("colors", "background", config.bgColorHex)
-    config.fgColorHex = gs("colors", "foreground", config.fgColorHex)
-    config.highlightBgColorHex =
-      gs("colors", "highlight_background", config.highlightBgColorHex)
-    config.highlightFgColorHex =
-      gs("colors", "highlight_foreground", config.highlightFgColorHex)
-    config.borderColorHex = gs("colors", "border_color", config.borderColorHex)
-    config.borderWidth = gi("border", "width", config.borderWidth)
+      elif sec == "border":
+        if key == "width":
+          config.borderWidth = val.parseInt
 
-    config.prompt = gs("input", "prompt", config.prompt)
-    config.cursor = gs("input", "cursor", config.cursor)
-    config.fontName = gs("font", "fontname", config.fontName)
-    config.themeName = gs("theme", "name", config.themeName)
-    config.terminalExe = gs("terminal", "program", "")
-    config.terminalExe = config.terminalExe.strip(chars = {'"', '\''})
+      elif sec == "input":
+        case key
+        of "prompt": config.prompt = val
+        of "cursor": config.cursor = val
+        else: discard
 
-  # ── 4. Apply named theme if requested ─────────────────────────────
+      elif sec == "font":
+        if key == "fontname":
+          config.fontName = val
+
+      elif sec == "terminal":
+        if key == "program":
+          config.terminalExe = val.strip(chars = {'"', '\''})
+
+
+      elif sec == "theme":
+        if key == "name":
+          config.themeName = val
+
+  # ── 4. Apply named theme if provided ───────────────────────────────
   if config.themeName.len > 0:
-    for th in themeList:
-      if th.name.toLower == config.themeName.toLower:
-        applyTheme(config, th.name)
-        break
+    applyTheme(config, config.themeName)
 
-  # ── 5. Compute window height ──────────────────────────────────────
-  let inputH = 40
-  config.winMaxHeight = inputH + config.maxVisibleItems * config.lineHeight
-
+  # ── 5. Derived geometry ────────────────────────────────────────────
+  config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
   echo "Using font: ", config.fontName
+
 
 #──────────────────────────────────────────────────────────────────────────────
 #  Fuzzy match / filtering
@@ -330,85 +302,124 @@ proc betterFuzzyMatch(q, t: string): bool =
   false
 
 proc updateFilteredApps() =
-  ## Updates `filteredApps` based on current `inputText` and selected input mode.
+  ## Rebuilds `filteredApps` according to the active input mode and query.
 
-  # ----- 1. Detect input mode from leading prefix -----
+  # ── 1. Detect input mode from leading prefix ───────────────────────
   if inputText.startsWith("/c "):
-    inputMode = imConfigSearch # config file search
+    inputMode = imConfigSearch          # ~/.config file search
   elif inputText.startsWith("/y "):
-    inputMode = imYouTube # YouTube search
+    inputMode = imYouTube               # YouTube search
   elif inputText.startsWith("/g "):
-    inputMode = imGoogle # Google search
+    inputMode = imGoogle                # Google search
   elif inputText.startsWith("/") and inputText.len > 1:
-    inputMode = imRunCommand # direct shell command
+    inputMode = imRunCommand            # direct shell command
   else:
-    inputMode = imNormal # normal application search
+    inputMode = imNormal                # normal application search
 
-  # ----- 2. Populate filteredApps according to active mode -----
+    # ── 2. Populate `filteredApps` for each mode ───────────────────────
   case inputMode
   of imNormal:
-    filteredApps = allApps.filterIt(betterFuzzyMatch(inputText, it.name))
-  of imRunCommand:
-    # Show a single synthetic entry indicating the command to run
-    filteredApps =
-      @[
-        DesktopApp(
-          name: "Run: " & inputText[1 ..^ 1].strip(),
-          exec: inputText[1 ..^ 1].strip(),
-          hasIcon: false,
-        )
-      ]
-  of imConfigSearch:
-    let query = inputText[3 ..^ 1].strip()
-    filteredApps = scanConfigFiles(query) # returns a seq[DesktopApp]
-  of imYouTube:
-    let query = inputText[3 ..^ 1].strip()
-    let url = "https://www.youtube.com/results?search_query=" & encodeUrl(query)
-    filteredApps =
-      @[DesktopApp(name: "Search YouTube: " & query, exec: url, hasIcon: false)]
-  of imGoogle:
-    let query = inputText[2 ..^ 1].strip()
-    let url = "https://www.google.com/search?q=" & encodeUrl(query)
-    filteredApps =
-      @[DesktopApp(name: "Search Google: " & query, exec: url, hasIcon: false)]
+    if inputText.len == 0:
+      ## No query → show recent apps first, but avoid duplicates
+      var rec: seq[DesktopApp]
+      var recentSet: HashSet[string]          # names already added
+      for n in recentApps:
+        var idx = -1
+        for i, a in allApps:
+          if a.name == n:
+            idx = i
+            break
+        if idx >= 0:
+          rec.add allApps[idx]
+          recentSet.incl n
 
-  # ----- 3. Reset selection & scroll -----
+      # Append the rest of the apps whose names aren’t in recentSet
+      filteredApps = rec & allApps.filterIt(not recentSet.contains(it.name))
+    else:
+      filteredApps = allApps.filterIt(betterFuzzyMatch(inputText, it.name))
+
+  of imRunCommand:
+    filteredApps = @[
+      DesktopApp(
+        name: "Run: " & inputText[1 .. ^1].strip(),
+        exec: inputText[1 .. ^1].strip(),
+        hasIcon: false,
+      )
+    ]
+
+  of imConfigSearch:
+    let query = inputText[3 .. ^1].strip()
+    filteredApps = scanConfigFiles(query)
+
+  of imYouTube:
+    let query = inputText[3 .. ^1].strip()
+    let url   = "https://www.youtube.com/results?search_query=" & encodeUrl(query)
+    filteredApps = @[DesktopApp(name: "Search YouTube: " & query,
+                                exec: url,
+                                hasIcon: false)]
+
+  of imGoogle:
+    let query = inputText[3 .. ^1].strip()
+    let url   = "https://www.google.com/search?q=" & encodeUrl(query)
+    filteredApps = @[DesktopApp(name: "Search Google: " & query,
+                                exec: url,
+                                hasIcon: false)]
+
+
+  # ── 3. Reset selection & scroll ────────────────────────────────────
   selectedIndex = 0
-  viewOffset = 0
+  viewOffset    = 0
+
 
 #──────────────────────────────────────────────────────────────────────────────
 #  Launch & key handling
 #──────────────────────────────────────────────────────────────────────────────
 proc launchSelectedApp() =
-  ## Execute whatever is currently selected / typed, depending on inputMode.
+  ## Execute whatever is currently selected / typed.
 
-  # ── 1.  Direct “/command …” trigger ───────────────────────────────
+  # 1. Explicit “/command …” ------------------------------------------------
   if inputMode == imRunCommand:
-    let cmd = inputText[1 .. ^1].strip()      # drop leading '/'
-    echo "DEBUG: executing -> ", cmd
+    let cmd = inputText[1 .. ^1].strip()       # drop leading '/'
     if cmd.len > 0:
-      runCommand(cmd)                         # open in terminal or headless
+      echo "DEBUG: executing -> ", cmd
+      runCommand(cmd)                          # wrap in terminal / headless
     shouldExit = true
     return
 
-  # ── 2.  Guard against empty list selections ───────────────────────
-  if selectedIndex notin 0 ..< filteredApps.len:
-    return
+  # 2. Guard against empty list selections ---------------------------------
+  if selectedIndex notin 0 ..< filteredApps.len: return
   let app = filteredApps[selectedIndex]
 
-  # ── 3.  Mode‑specific launches ────────────────────────────────────
+  # 3. Mode‑specific launches ----------------------------------------------
   case inputMode
   of imYouTube, imGoogle:
-    openUrl(app.exec)                         # browser search URL
+    openUrl(app.exec)                          # browser URL
 
   of imConfigSearch:
-    runCommand(app.exec)                      # xdg-open <file> inside terminal
+    discard startProcess("/bin/sh",
+                         args = ["-c", app.exec],
+                         options = {poDaemon}) # xdg-open file (no terminal)
 
-  else:                                       # imNormal (application launch)
+  else: # imNormal ----------------------------------------------------------
     let cleanExec = app.exec.split('%')[0].strip()
-    runCommand(cleanExec)                     # launch app via shell/terminal
+    discard startProcess("/bin/sh",
+                         args = ["-c", cleanExec],
+                         options = {poDaemon}) # launch app directly
+
+  # 4. Update recent‑apps list (imNormal only) ------------------------------
+  if inputMode == imNormal:
+    let n = app.name
+    let idx = recentApps.find(n)       # -1 if not present
+    if idx >= 0:                       # guard against RangeDefect
+      recentApps.delete(idx)
+
+    recentApps.insert(n, 0)            # push to front
+    if recentApps.len > maxRecent:
+      recentApps.setLen(maxRecent)
+    saveRecent()
 
   shouldExit = true
+
 
 proc handleKeyPress(event: var XEvent) =
   ## Map X11 keysyms → launcher actions.
@@ -444,15 +455,17 @@ proc handleKeyPress(event: var XEvent) =
       updateFilteredApps()
 
 #──────────────────────────────────────────────────────────────────────────────
-#  Main event loop
+#  Main loop
 #──────────────────────────────────────────────────────────────────────────────
 proc main() =
+  benchMode = "--bench" in commandLineParams()
   initLauncherConfig()
   loadApplications()
+  loadRecent() 
+  updateFilteredApps()
   initGui()
-  # check if benchmark parameter has been passed
-  if "--bench" in commandLineParams():
-    redrawWindow() # draw one frame so compositor records a surface
+  if benchMode:          # unchanged logic, now uses global flag
+    redrawWindow()
     quit 0
   updateParsedColors(config)
 

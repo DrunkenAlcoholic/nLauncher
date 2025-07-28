@@ -1,184 +1,161 @@
-# Nim Launcher
+# Nim Launcher
 
-> A simple, fast, and highly configurable application launcher for Linux (X11) written in pure Nim. Inspired by Rofi, designed for personal use and customization.
+> A lightning‑fast, X11‑native application + command launcher written in pure Nim.
+> Inspired by Rofi and Tofi, designed for minimal latency, easy theming, and zero toolkit bloat.
 
-<img src="Screenshot.gif" width="600" alt="Nim Launcher">
+![Nim Launcher screenshot](Screenshot.gif)
 
-## Features
+---
 
-- **Fuzzy Search:** Instantly filters applications as you type, with typo tolerance.
-- **Keyboard Navigation:** Fully controllable with the keyboard.
-- **Live Theme Switching:** Press <kbd>F5</kbd> to cycle through built-in themes instantly.
-- **Borderless & Centered:** Clean and undecorated, appears centered on screen.
-- **Configurable UI:** Window position, border width, prompt, fonts, and more.
-- **Theme Support:** Choose from built-in themes or define your own.
-- **Fast Startup:** Caches results; only re-scans when `.desktop` files change.
-- **Lightweight:** No GUI toolkit overhead—pure Nim and X11.
+## Highlights
 
-## Getting Started
+| Feature                            | Notes                                                                                    |
+| ---------------------------------- | ---------------------------------------------------------------------------------------- |
+| **Typo‑tolerant fuzzy search**     | `firefx` → Firefox                                                                       |
+|  **Sub‑1 ms startup (bench mode)** | `--bench` flag for raw launch timing                                                     |
+| **Recent‑apps history**            | Empty query shows your last launches first                                               |
+| **100 % keyboard‑driven**          | Arrow keys / Enter / Esc                                                                 |
+| **Live theme cycling**             | Press <kbd>F5</kbd> to rotate through built‑ins                                          |
+| **Fully themable**                 | 25+ colour schemes shipped; define your own                                              |
+| **Any Xft font**                   | `fontname = JetBrainsMono:size=14`                                                       |
+| **Slash triggers**                 | `/ …` run command • `/c cfg` open dotfile • `/y video` or `/g query` open browser search |
+| **Zero toolkit**                   | Pure Xlib + Xft ⇒ tiny binary                                                            |
 
-### Requirements(for building)
+---
 
-- **Nim compiler**
-- **X11 development libraries**
+## Building & Running
 
-### Install Dependencies
+> **Skip this if you just use the pre‑built binary** in the repo release page.
 
-#### Arch Linux / Manjaro:
+### Dependencies
 
-```bash
-sudo pacman -S nim libx11 libxft
-```
+| Package      | Arch / Manjaro                 | Debian / Ubuntu                          |
+| ------------ | ------------------------------ | ---------------------------------------- |
+| Nim compiler | `sudo pacman -S nim`           | `sudo apt install nim`                   |
+| X11 headers  | `sudo pacman -S libx11 libxft` | `sudo apt install libx11-dev libxft-dev` |
 
-#### Ubuntu / Debian:
-
-```bash
-sudo apt-get install nim libx11-dev libxft-dev
-```
-
-### Build & Run
+### Build
 
 ```bash
 git clone https://github.com/DrunkenAlcoholic/nim_launcher.git
 cd nim_launcher
-nimble install x11
-nimble build -d:release
+nimble install x11            # one‑time; pulls Nim X11 bindings
+nimble build -d:release       # creates ./nim_launcher
 ```
 
-Move the resulting `nim_launcher` binary somewhere in your `$PATH`.
+### Bind to a hotkey
 
-## Usage
-
-### Launching
-
-Bind the launcher to a key combo in your window manager or desktop environment.
-
-For example, in i3:
+Example (i3 WM):
 
 ```ini
-bindsym $mod+d exec ~/path/to/nim_launcher
+bindsym $mod+d exec --no-startup-id nim_launcher
 ```
-
-### Controls
-
-| Key                 | Action                               |
-| ------------------- | ------------------------------------ |
-| Type                | Filter applications via fuzzy search |
-| ↑ / ↓               | Navigate list                        |
-| Enter               | Launch selected application          |
-| Escape / Focus Lost | Exit launcher                        |
-| F5                  | Cycle through built-in themes        |
 
 ---
 
-## Configuration
+## Usage Cheat‑sheet
 
-On first run, a default config file is created:
+| Keys / Action       | Result                                           |
+| ------------------- | ------------------------------------------------ |
+| _Type letters_      | Instant fuzzy filter (typo tolerant)             |
+| `/cmd …`            | Run shell command inside your terminal           |
+| `/c …`              | Search `~/.config` for dotfiles → open in editor |
+| `/y …`              | YouTube search in browser                        |
+| `/g …`              | Google search in browser                         |
+| **Enter**           | Launch item / run command                        |
+| **Esc** / focus‑out | Quit                                             |
+| **↑ / ↓**           | Navigate list                                    |
+| **F5**              | Cycle built‑in themes                            |
+| _(empty query)_     | Shows recent applications first                  |
 
+Bench start‐time:
+
+```bash
+nim_launcher --bench      # prints time & exits, used by hyperfine
 ```
-~/.config/nim_launcher/config.ini
-```
+
+---
+
+## Configuration (`~/.config/nim_launcher/config.ini`)
+
+<details>
+<summary>Click to expand</summary>
 
 ### `[window]`
 
-| Key                 | Description                                         |
-| ------------------- | --------------------------------------------------- |
-| `width`             | Width of the window in pixels                       |
-| `max_visible_items` | Max number of entries shown at once                 |
-| `center`            | Center the window (`true`/`false`)                  |
-| `position_x`        | X position if `center = false`                      |
-| `position_y`        | Y position if `center = false`                      |
-| `vertical_align`    | `"top"`, `"center"`, or `"one-third"` when centered |
+| Key                 | Default     | Meaning                          |
+| ------------------- | ----------- | -------------------------------- |
+| `width`             | `600`       | Window width (px)                |
+| `max_visible_items` | `15`        | Rows shown before scrolling      |
+| `center`            | `true`      | Center horizontally              |
+| `vertical_align`    | `one-third` | `top` \| `center` \| `one-third` |
+| `position_x / y`    | `500 / 50`  | Used when `center = false`       |
 
 ### `[font]`
 
-| Key        | Description                                | Example             |
-| ---------- | ------------------------------------------ | ------------------- |
-| `fontname` | Font family and size (Xft-compatible name) | `Noto Sans:size=11` |
+| Key        | Example                 |
+| ---------- | ----------------------- |
+| `fontname` | `JetBrainsMono:size=14` |
 
 ### `[input]`
 
-| Key      | Description                     |
-| -------- | ------------------------------- |
-| `prompt` | Text shown before user input    |
-| `cursor` | Character shown at input cursor |
+| Prompt | Cursor |
+| ------ | ------ |
+| `> `   | `_`    |
 
 ### `[border]`
 
-| Key     | Description                   |
-| ------- | ----------------------------- |
-| `width` | Width of the border in pixels |
+| Key     | Default |
+| ------- | ------- |
+| `width` | `2`     |
 
 ### `[colors]`
 
-| Key                    | Description                       |
-| ---------------------- | --------------------------------- |
-| `background`           | Background color (e.g. `#2E3440`) |
-| `foreground`           | Font color                        |
-| `highlight_background` | Selected item background          |
-| `highlight_foreground` | Selected item text color          |
-| `border_color`         | Window border color               |
+Same keys as other launchers (`background`, `foreground`, `highlight_background`, `highlight_foreground`, `border_color`). Hex `#RRGGBB`.
 
 ### `[theme]`
 
-| Key    | Description                                                           |
-| ------ | --------------------------------------------------------------------- |
-| `name` | Choose a built-in theme (case-insensitive), or leave blank for custom |
-
----
-
-## Built-in Themes
-
-You can set the theme using:
-
 ```ini
 [theme]
-name = Dracula
+name = Nord
 ```
 
-Available options (alphabetically):
+Leave blank to honour `[colors]`.
 
-- Ayu Dark
-- Ayu Light
-- Catppuccin Frappe
-- Catppuccin Latte
-- Catppuccin Macchiato
-- Catppuccin Mocha
-- Cobalt
-- Dracula
-- GitHub Dark
-- GitHub Light
-- Gruvbox Dark
-- Gruvbox Light
-- Material Dark
-- Material Light
-- Monokai
-- Monokai Pro
-- Nord
-- One Dark
-- One Light
-- Palenight
-- Solarized Dark
-- Solarized Light
-- Synthwave 84
-- Tokyo Night
-- Tokyo Night Light
+### `[terminal]`
 
-Leave `name` empty to use `[colors]`.
+```ini
+[terminal]
+program = alacritty
+```
+
+If empty, `$TERMINAL` env or a fallback list (`kitty`, `wezterm`, `xterm`…) is used.
+
+</details>
 
 ---
 
-## Future Improvements (Ideas)
+## Built‑in Themes
 
-- Track & prioritize most used applications
-- Optional application icon display (with toggle in config)
-- Real-time highlight of matched letters during fuzzy search
-- Optional mouse interaction or UI enhancements
+Nord • Dracula • Solarized (Light + Dark) • Gruvbox (Light + Dark) • Catppuccin (4 flavours) • Material (Light + Dark) • One (Light + Dark) • Monokai (+ Pro) • GitHub (Light + Dark) • Ayu (Light + Dark) • Synthwave 84 • Palenight • Cobalt • Tokyo Night (Light + Dark)
 
-## Disclaimer
+Cycle live with <kbd>F5</kbd>.
 
-ChatGPT helped me refine and improve this program. While the core functionality and workflow came from my own needs, the AI assistance was invaluable for handling edge cases, improving error handling, and making the code more robust across different Linux environments, ChatGPT also assisted in writing this readme.
+---
 
-## License
+## Planned
 
-Licensed under GPL-3. See `LICENSE` for details.
+- Pixel‑level character highlighting in matches
+- Optional application icons (SVG/PNG lookup with caching)
+- Config‑selectable history length
+- Wayland port (via `wlroots` or `wlr-layer-shell`) 🤔
+
+---
+
+## Credits
+
+_Written & maintained by @DrunkenAlcoholic._
+ChatGPT assisted in refactors, edge‑case handling, and this README.
+
+Licensed under **GPL‑3.0**.
+Enjoy launching at ludicrous speed 🚀

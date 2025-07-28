@@ -1,148 +1,75 @@
-# src/state.nim
+## state.nim — centralised data definitions & global state
+## (No logic; only types / global vars / simple constants)
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Imports
-#──────────────────────────────────────────────────────────────────────────────
-import x11/[xlib, x] ## for PDisplay, Window, GC, culong, etc.
-import std/[os, strutils]
+import x11/[xlib, x]
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Application & cache records
-#──────────────────────────────────────────────────────────────────────────────
-
+# ── Data structures ────────────────────────────────────────────────────
 type
-  DesktopApp* = object ## Parsed fields from a *.desktop* file (subset we care about).
-    name*: string ## Display name
-    exec*: string ## Command line (may contain % codes)
-    hasIcon*: bool ## True if Icon= present in the file
+  ## A single launchable application (.desktop entry)
+  DesktopApp* = object
+    name*, exec*: string
+    hasIcon*: bool
 
-  CacheData* = object ## JSON‑serialised on disk for fast start‑up.
-    usrMtime*: int64 ## mtime of /usr/share/applications
-    localMtime*: int64 ## mtime of ~/.local/share/applications
-    apps*: seq[DesktopApp] ## De‑duplicated application list
+  ## Cached scan payload written to ~/.cache/nim_launcher/apps.json
+  CacheData* = object
+    usrMtime*, localMtime*: int64
+    apps*: seq[DesktopApp]
 
-#──────────────────────────────────────────────────────────────────────────────
-#  GUI & config records
-#──────────────────────────────────────────────────────────────────────────────
+  ## Launcher configuration (populated by initLauncherConfig)
+  Config* = object # Window geometry
+    winWidth*, winMaxHeight*: int
+    lineHeight*, maxVisibleItems*: int
+    centerWindow*: bool
+    positionX*, positionY*: int
+    verticalAlign*: string ## "top" | "center" | "one‑third"
 
-type Config* = object
-  ## User‑tweakable launcher settings (loaded from INI).
-  # — Window geometry —
-  winWidth*, winMaxHeight*: int
-  lineHeight*, maxVisibleItems*: int
-  centerWindow*: bool
-  positionX*, positionY*: int
-  verticalAlign*: string ## "top", "center", "one-third"
+    # Colours (hex strings from INI, resolved to X pixels at runtime)
+    bgColorHex*, fgColorHex*: string
+    highlightBgColorHex*, highlightFgColorHex*: string
+    borderColorHex*: string
+    borderWidth*: int
 
-  # — Colours (hex strings) —
-  bgColorHex*, fgColorHex*: string
-  highlightBgColorHex*, highlightFgColorHex*: string
-  borderColorHex*: string
+    # Prompt / font / theme / terminal
+    prompt*, cursor*: string
+    fontName*: string
+    themeName*: string
+    terminalExe*: string ## preferred terminal program
 
-  borderWidth*: int
+    # X pixel values (filled in gui.initGui)
+    bgColor*, fgColor*, highlightBgColor*, highlightFgColor*, borderColor*: culong
 
-  # — Prompt & font —
-  prompt*, cursor*: string
-  fontName*: string
+  ## ───────────────────────────────────────────────────────────────────
+  ##  Input‑mode state (determined by leading prefix)
+  ## -------------------------------------------------------------------
+  InputMode* = enum # <── ADD
+    imNormal # plain application search
+    imRunCommand # "/<cmd>"
+    imConfigSearch # "/c <query>"
+    imYouTube # "/y <query>"
+    imGoogle # "/g <query>"
 
-  # — Terminal —
-  terminalExe*: string ## path to program icon (if any)
-
-  # — Theme selection —
-  themeName*: string ## empty ⇒ custom colours
-
-  # — Runtime‑parsed X11 pixels (set after display open) —
-  bgColor*, fgColor*: culong
-  highlightBgColor*, highlightFgColor*: culong
-  borderColor*: culong
-
-type InputMode* = enum ## Current interpretation of user input
-  imNormal # regular fuzzy‑app search
-  imRunCommand # `/...`
-  imConfigSearch # `/c ...`
-  imYouTube # `/y ...`
-  imGoogle # `/g ...`
-
-#──────────────────────────────────────────────────────────────────────────────
-#  Global singletons (mutable)  — accessed from gui & launcher
-#──────────────────────────────────────────────────────────────────────────────
-
+# ── X11 handles (initialised in gui.initGui) ────────────────────────────
 var
-  ## X11 handles (populated in gui.initGui) ------------------------
-  display*: PDisplay = nil ## XOpenDisplay result
-  screen*: cint = 0
-  window*: Window = 0
-  graphicsContext*: GC = nil
+  display*: PDisplay
+  window*: Window
+  gc*: GC
+  screen*: cint
+  inputMode*: InputMode
 
-  ## User configuration -------------------------------------------
-  config*: Config ## filled by nim_launcher.initLauncherConfig()
+# ── Runtime state ───────────────────────────────────────────────────────
+var
+  config*: Config
+  allApps*, filteredApps*: seq[DesktopApp]
+  inputText*: string
+  selectedIndex*, viewOffset*: int
+  shouldExit*: bool
+  benchMode*: bool = false
+  recentApps*: seq[string]           ## most‑recent‑first names
 
-  ## Application lists --------------------------------------------
-  allApps*: seq[DesktopApp] = @[] ## master list (from cache/scan)
-  filteredApps*: seq[DesktopApp] = @[] ## current fuzzy‑matched view
-
-  ## UI state ------------------------------------------------------
-  selectedIndex*: int = 0 ## highlighted row in filteredApps
-  viewOffset*: int = 0 ## first row currently visible
-  inputText*: string = "" ## user’s typed filter string
-
-  ## Control flag --------------------------------------------------
-  shouldExit*: bool = false ## set to true → main loop quits
-
-  ## Input mode ---------------------------------------------------
-  inputMode*: InputMode = imNormal ## current interpretation of user input
-
-const fallbackTerms* = [
+# ── Terminal fallback list ──────────────────────────────────────────────
+const 
+  fallbackTerms* = [
   "kitty", "alacritty", "wezterm", "foot", "gnome-terminal", "konsole",
-  "xfce4-terminal", "xterm",
-]
+  "xfce4-terminal", "xterm"]
+  maxRecent* = 10
 
-proc exeExists*(exe: string): bool =
-  ## True if `exe` is runnable (accepts absolute path too)
-  var e = exe.strip(chars = {'"', '\''})
-  if e.contains('/'): # absolute or relative path
-    return fileExists(e)
-  for d in getEnv("PATH", "").split(':'):
-    if fileExists(d / e):
-      return true
-  false
-
-proc findExe(exe: string): string =
-  ## Return absolute path if exe is found in PATH, else "".
-  for dir in getEnv("PATH", "").split(':'):
-    let p = dir / exe
-    if fileExists(p):
-      return p
-  result = "" # not found
-
-proc chooseTerminal*(): string =
-  ## Returns absolute path of the first usable terminal.
-  # 1) config file
-  if config.terminalExe.len > 0:
-    let cfg = config.terminalExe.strip(chars = {'"', '\''})
-    if cfg.contains('/'): # absolute path given
-      if fileExists(cfg):
-        return cfg
-    else:
-      let f = findExe(cfg)
-      if f.len > 0:
-        return f
-
-  # 2) $TERMINAL
-  let envTerm = getEnv("TERMINAL", "")
-  if envTerm.len > 0:
-    if envTerm.contains('/'): # absolute
-      if fileExists(envTerm):
-        return envTerm
-    else:
-      let f = findExe(envTerm)
-      if f.len > 0:
-        return f
-
-  # 3) fallbacks
-  for t in fallbackTerms:
-    let p = findExe(t)
-    if p.len > 0:
-      return p
-
-  return "" # none found
