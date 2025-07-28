@@ -1,76 +1,138 @@
-## state.nim — centralised data definitions & global state
-## (No logic; only types / global vars / simple constants)
+#──────────────────────────────────────────────────────────────────────────────
+#  state.nim — Centralized data definitions & global runtime state
+#──────────────────────────────────────────────────────────────────────────────
+# This module defines:
+#   - Types for app metadata, config, and launcher state
+#   - Global mutable state used throughout the launcher
+#   - Constants including terminal fallbacks and config template
+#
+# IMPORTANT: This file is intentionally logic-free to avoid circular dependencies.
+# Only use it to define types, constants, and global vars.
 
 import x11/[xlib, x]
 
-# ── Data structures ────────────────────────────────────────────────────
+#──────────────────────────────────────────────────────────────────────────────
+#  Data Types
+#──────────────────────────────────────────────────────────────────────────────
+
 type
-  ## A single launchable application (.desktop entry)
+  ## One entry in the application list.
   DesktopApp* = object
     name*, exec*: string
-    hasIcon*: bool
+    hasIcon*: bool              ## True if the .desktop file had an Icon= entry
 
-  ## Cached scan payload written to ~/.cache/nim_launcher/apps.json
+  ## Cached app list and mtimes for /usr and ~/.local launchers
   CacheData* = object
     usrMtime*, localMtime*: int64
     apps*: seq[DesktopApp]
 
-  ## Launcher configuration (populated by initLauncherConfig)
-  Config* = object # Window geometry
+  ## Runtime configuration object populated by initLauncherConfig()
+  Config* = object
+    # ─ Window geometry
     winWidth*, winMaxHeight*: int
     lineHeight*, maxVisibleItems*: int
     centerWindow*: bool
     positionX*, positionY*: int
-    verticalAlign*: string ## "top" | "center" | "one‑third"
+    verticalAlign*: string          ## "top", "center", or "one-third"
 
-    # Colours (hex strings from INI, resolved to X pixels at runtime)
+    # ─ Colors (hex strings from INI)
     bgColorHex*, fgColorHex*: string
     highlightBgColorHex*, highlightFgColorHex*: string
     borderColorHex*: string
     borderWidth*: int
 
-    # Prompt / font / theme / terminal
+    # ─ Fonts / prompt / terminal
     prompt*, cursor*: string
     fontName*: string
     themeName*: string
-    terminalExe*: string ## preferred terminal program
+    terminalExe*: string
 
-    # X pixel values (filled in gui.initGui)
+    # ─ Parsed Xft/X11 colors (populated at runtime)
     bgColor*, fgColor*, highlightBgColor*, highlightFgColor*, borderColor*: culong
 
-  ## ───────────────────────────────────────────────────────────────────
-  ##  Input‑mode state (determined by leading prefix)
-  ## -------------------------------------------------------------------
-  InputMode* = enum # <── ADD
-    imNormal # plain application search
-    imRunCommand # "/<cmd>"
-    imConfigSearch # "/c <query>"
-    imYouTube # "/y <query>"
-    imGoogle # "/g <query>"
-    imWiki # "/w <query>"
+  ## Input interpretation mode based on prefix
+  InputMode* = enum
+    imNormal,         ## Default app search
+    imRunCommand,     ## `/...` → direct command
+    imConfigSearch,   ## `/c ...` → match ~/.config
+    imYouTube,        ## `/y ...` → open YouTube search
+    imGoogle,         ## `/g ...` → open Google search
+    imWiki            ## `/w ...` → open Wikipedia search
 
-# ── X11 handles (initialised in gui.initGui) ────────────────────────────
+#──────────────────────────────────────────────────────────────────────────────
+#  Global X11 handles
+#──────────────────────────────────────────────────────────────────────────────
+
 var
   display*: PDisplay
   window*: Window
   gc*: GC
   screen*: cint
-  inputMode*: InputMode
 
-# ── Runtime state ───────────────────────────────────────────────────────
+#──────────────────────────────────────────────────────────────────────────────
+#  Global launcher runtime state
+#──────────────────────────────────────────────────────────────────────────────
+
 var
   config*: Config
+  inputMode*: InputMode = imNormal
+
   allApps*, filteredApps*: seq[DesktopApp]
   inputText*: string
   selectedIndex*, viewOffset*: int
   shouldExit*: bool
-  benchMode*: bool = false
-  recentApps*: seq[string]           ## most‑recent‑first names
+  recentApps*: seq[string]            ## Most recently launched apps
+  benchMode*: bool = false            ## Set true with --bench flag
 
-# ── Terminal fallback list ──────────────────────────────────────────────
-const 
-  fallbackTerms* = [
-  "kitty", "alacritty", "wezterm", "foot", "gnome-terminal", "konsole",
-  "xfce4-terminal", "xterm"]
+#──────────────────────────────────────────────────────────────────────────────
+#  Constants
+#──────────────────────────────────────────────────────────────────────────────
+
+const
   maxRecent* = 10
 
+  ## Hard-coded fallback terminal list (used if config & $TERMINAL are empty)
+  fallbackTerms* = [
+    "kitty", "alacritty", "wezterm", "foot",
+    "gnome-terminal", "konsole", "xfce4-terminal", "xterm",
+  ]
+
+const iniTemplate* = """
+[window]
+width              = 500
+max_visible_items  = 10
+center             = true
+position_x         = 20
+position_y         = 50
+vertical_align     = "one-third"
+
+[font]
+fontname = Noto Sans:size=12
+
+[input]
+prompt   = "> "
+cursor   = "_"
+
+[terminal]
+program  = gnome-terminal
+
+[border]
+width    = 2
+
+[colors]
+background           = "#2E3440"
+foreground           = "#D8DEE9"
+highlight_background = "#88C0D0"
+highlight_foreground = "#2E3440"
+border_color         = "#8BE9FD"
+
+[theme]
+# Leaving this empty will use the colour scheme in the [colors] section. 
+# Or choose a built-in theme:
+#name = "Ayu Dark"
+#name = "Catppuccin Mocha"
+#name = "Dracula"
+#name = "Gruvbox Dark"
+#name = "Nord"
+#name = "One Dark"
+"""

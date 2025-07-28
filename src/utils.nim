@@ -1,76 +1,113 @@
-## utils.nim ── small helpers shared by several modules
+#──────────────────────────────────────────────────────────────────────────────
+#  utils.nim — Shared helpers used across nim_launcher modules
+#──────────────────────────────────────────────────────────────────────────────
+
 import std/[os, strutils, times, json]
 import x11/[xlib, x, xft, xrender]
-import state                           # display*, screen*, config, fallbackTerms
+import state  # for: display, screen, config, fallbackTerms, recentApps
 
-# ── Executable discovery ───────────────────────────────────────────────
+#──────────────────────────────────────────────────────────────────────────────
+#  Executable Discovery
+#──────────────────────────────────────────────────────────────────────────────
+
 proc exeExists*(exe: string): bool =
-  ## True if `exe` is runnable (absolute or on $PATH).
+  ## Returns true if the executable is found on $PATH or as absolute path.
   let e = exe.strip(chars = {'"', '\''})
   if '/' in e:
     return fileExists(e)
-  for dir in getEnv("PATH","").split(':'):
+  for dir in getEnv("PATH", "").split(':'):
     if fileExists(dir / e): return true
-  false
+  result = false
 
 proc chooseTerminal*(): string =
-  ## First working terminal from config / $TERMINAL / fallbackTerms; else "".
-  if config.terminalExe.len>0 and exeExists(config.terminalExe): return config.terminalExe
-  let envT = getEnv("TERMINAL","")
-  if envT.len>0 and exeExists(envT): return envT
-  for t in fallbackTerms: 
-    if exeExists(t): 
-      return t
-  ""
+  ## Chooses the first available terminal, checking config, $TERMINAL, then fallback list.
+  if config.terminalExe.len > 0 and exeExists(config.terminalExe):
+    return config.terminalExe
 
-# ── Timing macro ───────────────────────────────────────────────────────
+  let envT = getEnv("TERMINAL", "")
+  if envT.len > 0 and exeExists(envT):
+    return envT
+
+  for t in fallbackTerms:
+    if exeExists(t):
+      return t
+
+  result = ""
+
+#──────────────────────────────────────────────────────────────────────────────
+#  Timing Utility
+#──────────────────────────────────────────────────────────────────────────────
+
 template timeIt*(msg: string, body: untyped) =
+  ## Prints timing info for a code block, prefixed with `msg`.
   let t0 = epochTime()
   body
   echo msg, " ", epochTime() - t0, "s"
 
-# ── Colour helpers (shared by gui & launcher) ──────────────────────────
+#──────────────────────────────────────────────────────────────────────────────
+#  Color Helpers for Xlib + Xft
+#──────────────────────────────────────────────────────────────────────────────
+
 proc parseColor*(hex: string): culong =
-  ## "#RRGGBB" → pixel value (returns 0 on error, already warned).
-  if not (hex.len==7 and hex[0]=='#'): return 0
+  ## Parses "#RRGGBB" to a pixel value via XAllocColor (returns 0 on failure).
+  if not (hex.len == 7 and hex[0] == '#'): return 0
   try:
     let r = parseHexInt(hex[1..2])
     let g = parseHexInt(hex[3..4])
     let b = parseHexInt(hex[5..6])
+
     var c: XColor
-    c.red   = uint16(r*257)
-    c.green = uint16(g*257)
-    c.blue  = uint16(b*257)
+    c.red   = uint16(r * 257)
+    c.green = uint16(g * 257)
+    c.blue  = uint16(b * 257)
     c.flags = cast[cchar](DoRed or DoGreen or DoBlue)
-    if XAllocColor(display, XDefaultColormap(display,screen), c.addr)==0: return 0
+
+    if XAllocColor(display, XDefaultColormap(display, screen), c.addr) == 0:
+      return 0
     result = c.pixel
-  except: result = 0
+  except:
+    result = 0
 
 proc allocXftColor*(hex: string, dest: var XftColor) =
-  ## Fills `dest` with an allocated XftColor (raises on failure).
-  if not (hex.len==7 and hex[0]=='#'): quit "invalid colour: " & hex
+  ## Parses "#RRGGBB" to an XftColor and fills `dest`, quitting on failure.
+  if not (hex.len == 7 and hex[0] == '#'):
+    quit "invalid colour: " & hex
+
   let r = parseHexInt(hex[1..2])
   let g = parseHexInt(hex[3..4])
   let b = parseHexInt(hex[5..6])
+
   var rc: XRenderColor
-  rc.red   = uint16(r*257)
-  rc.green = uint16(g*257)
-  rc.blue  = uint16(b*257)
+  rc.red   = uint16(r * 257)
+  rc.green = uint16(g * 257)
+  rc.blue  = uint16(b * 257)
   rc.alpha = 65535
-  if XftColorAllocValue(display, DefaultVisual(display,screen),
-                        DefaultColormap(display,screen), rc.addr,dest.addr)==0:
+
+  if XftColorAllocValue(display,
+                        DefaultVisual(display, screen),
+                        DefaultColormap(display, screen),
+                        rc.addr, dest.addr) == 0:
     quit "XftColorAllocValue failed for " & hex
 
-let recentFile* = getHomeDir()/".cache"/"nim_launcher"/"recent.json"
+#──────────────────────────────────────────────────────────────────────────────
+#  Recently Used App Tracker
+#──────────────────────────────────────────────────────────────────────────────
+
+let recentFile* = getHomeDir() / ".cache" / "nim_launcher" / "recent.json"
 
 proc loadRecent*() =
+  ## Loads recent apps list from JSON file into state.recentApps.
   if fileExists(recentFile):
     try:
       let j = parseJson(readFile(recentFile))
       state.recentApps = j.to(seq[string])
-    except: discard
+    except:
+      discard
+
 proc saveRecent*() =
+  ## Saves state.recentApps to recent.json in user cache.
   try:
     createDir(recentFile.parentDir)
     writeFile(recentFile, pretty(%state.recentApps))
-  except: discard              # non‑fatal
+  except:
+    discard  # non-fatal

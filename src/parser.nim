@@ -1,26 +1,27 @@
-# src/parser.nim
-#
-# Parses .desktop files to build the application list.
+#──────────────────────────────────────────────────────────────────────────────
+#  parser.nim — .desktop File Parser for nim_launcher
+#──────────────────────────────────────────────────────────────────────────────
+# This module parses .desktop files and extracts application metadata.
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Imports
-#──────────────────────────────────────────────────────────────────────────────
 import std/[os, strutils, streams, tables, options]
 import state
 
 #──────────────────────────────────────────────────────────────────────────────
-#  Exec‑line helper
+#  Exec-Line Helper
 #──────────────────────────────────────────────────────────────────────────────
+
 proc getBaseExec*(exec: string): string =
-  ## Extracts the base executable name from an Exec string.
+  ## Extracts the base executable name from an Exec line.
+  ## Removes placeholders like %f and keeps just the executable.
   let cleanExec = exec.split('%')[0].strip()
-  return cleanExec.split(' ')[0].extractFilename()
+  result = cleanExec.split(' ')[0].extractFilename()
 
 #──────────────────────────────────────────────────────────────────────────────
-#  .desktop file parser
+#  Best Name/Exec Value Selection (Handles Localization)
 #──────────────────────────────────────────────────────────────────────────────
+
 proc getBestValue*(entries: Table[string, string], baseKey: string): string =
-  ## Selects the best value for a key, handling localization.
+  ## Picks the best localized value for a .desktop key like "Name" or "Exec".
   if entries.hasKey(baseKey):
     return entries[baseKey]
   if entries.hasKey(baseKey & "[en_US]"):
@@ -32,14 +33,17 @@ proc getBestValue*(entries: Table[string, string], baseKey: string): string =
       return val
   return ""
 
+#──────────────────────────────────────────────────────────────────────────────
+#  .desktop File Parser
+#──────────────────────────────────────────────────────────────────────────────
+
 proc parseDesktopFile*(path: string): Option[DesktopApp] =
-  ## Parses a .desktop file and returns a DesktopApp if valid.
+  ## Parses a .desktop file and returns a DesktopApp if valid, else none.
   let stream = newFileStream(path, fmRead)
-  if stream == nil:
+  if stream.isNil:
     echo "[PARSE FAIL] ", path, " (file not readable)"
     return none(DesktopApp)
-  defer:
-    stream.close()
+  defer: stream.close()
 
   var inDesktopEntrySection = false
   var entries = initTable[string, string]()

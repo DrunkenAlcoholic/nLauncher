@@ -1,34 +1,44 @@
 #──────────────────────────────────────────────────────────────────────────────
-#  gui.nim  —  X11 / Xft drawing and window management
+#  gui.nim — X11 + Xft Drawing and Event Handling for nim_launcher
 #──────────────────────────────────────────────────────────────────────────────
-#  Imports
-#──────────────────────────────────────────────────────────────────────────────
+
 import strutils, times
 import x11/[xlib, xft, x, xrender]
-import ./[state, utils] # display*, screen*, window*, gc*, config, …
+import ./[state, utils]
 
 #──────────────────────────────────────────────────────────────────────────────
-#  Global Xft handles
+#  Globals and Shared X Resources
 #──────────────────────────────────────────────────────────────────────────────
 var
-  font*: PXftFont ## primary UI font (config.fontName)
-  overlayFont*: PXftFont ## smaller font for theme overlay
+  font*: PXftFont
+  overlayFont*: PXftFont
   xftDraw: PXftDraw
 
   xftColorFg, xftColorHighlightFg: XftColor
   xftColorBg, xftColorHighlightBg: culong
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Theme‑overlay timing state
-#──────────────────────────────────────────────────────────────────────────────
 const
   OverlayDurationMs* = 3_000
   FadeDurationMs* = 500
-  OverlayFontDelta = 2 ## overlay font size = main – 2
+  OverlayFontDelta = 2
 
 var
   lastThemeSwitchMs*: int64 = 0
   currentThemeName*: string = ""
+
+#──────────────────────────────────────────────────────────────────────────────
+#  Exported Procedures
+#──────────────────────────────────────────────────────────────────────────────
+
+proc initWindow*()
+proc updateGuiColors*()
+proc redrawWindow*()
+proc notifyThemeChanged*(name: string)
+proc drawText*(txt: string, x, y: int, selected: bool)
+
+#──────────────────────────────────────────────────────────────────────────────
+#  Utility Procedures
+#──────────────────────────────────────────────────────────────────────────────
 
 proc nowMs*(): int64 =
   (epochTime() * 1_000).int64
@@ -37,9 +47,6 @@ proc notifyThemeChanged*(name: string) =
   currentThemeName = name
   lastThemeSwitchMs = nowMs()
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Font helpers
-#──────────────────────────────────────────────────────────────────────────────
 proc deriveSmallerFont(base: string): string =
   const key = ":size="
   let idx = base.find(key)
@@ -56,6 +63,11 @@ proc loadFont(display: PDisplay, screen: cint, name: string): PXftFont =
     quit "Failed to load font: " & name
   f
 
+proc textWidth(f: PXftFont, txt: string): int =
+  var ext: XGlyphInfo
+  XftTextExtentsUtf8(display, f, cast[PFcChar8](txt[0].addr), txt.len.cint, ext.addr)
+  ext.xOff
+
 proc updateGuiColors*() =
   allocXftColor(config.fgColorHex, xftColorFg)
   allocXftColor(config.highlightFgColorHex, xftColorHighlightFg)
@@ -63,87 +75,30 @@ proc updateGuiColors*() =
   xftColorHighlightBg = config.highlightBgColor
 
 #──────────────────────────────────────────────────────────────────────────────
-#  Text metrics helper
+#  GUI Setup
 #──────────────────────────────────────────────────────────────────────────────
-proc textWidth(f: PXftFont, txt: string): int =
-  var ext: XGlyphInfo
-  XftTextExtentsUtf8(display, f, cast[PFcChar8](txt[0].addr), txt.len.cint, ext.addr)
-  ext.xOff
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Overlay drawing
-#──────────────────────────────────────────────────────────────────────────────
-proc drawThemeOverlay(winW, winH: int) =
-  if lastThemeSwitchMs == 0 or overlayFont.isNil:
-    return
-  let elapsed = nowMs() - lastThemeSwitchMs
-  if elapsed > OverlayDurationMs:
-    return
-
-  var alpha = 1.0
-  if elapsed > OverlayDurationMs - FadeDurationMs:
-    alpha =
-      1.0 - (elapsed - (OverlayDurationMs - FadeDurationMs)).float / FadeDurationMs.float
-
-  let txt = currentThemeName
-  let txtW = overlayFont.textWidth(txt)
-  let txtH = overlayFont.ascent + overlayFont.descent
-  const pad = 6
-  let x = winW - txtW - pad - 4
-  let y = winH - txtH - pad - 4
-
-  discard XSetForeground(display, gc, xftColorBg)
-  discard XFillRectangle(
-    display, window, gc, cint(x - 4), cint(y - 4), cuint(txtW + 8), cuint(txtH + 8)
-  )
-
-  XftDrawStringUtf8(
-    xftDraw,
-    xftColorFg.addr,
-    overlayFont,
-    cint(x),
-    cint(y + overlayFont.ascent),
-    cast[PFcChar8](txt[0].addr),
-    txt.len.cint,
-  )
-
-#──────────────────────────────────────────────────────────────────────────────
-#  initGui — create window, fonts, colours
-#──────────────────────────────────────────────────────────────────────────────
-proc initGui*() =
+proc initWindow*() =
   display = XOpenDisplay(nil)
   if display.isNil:
     quit "Cannot open X display"
   screen = XDefaultScreen(display)
 
-  # ── Fonts & Xft ───────────────────────────────────────────────────
-  if not benchMode:                       # <── NEW GUARD
-    font        = loadFont(display, screen, config.fontName)
-    overlayFont = loadFont(display, screen, deriveSmallerFont(config.fontName))
-  else:
-    font = nil
-    overlayFont = nil
+  font = loadFont(display, screen, config.fontName)
+  overlayFont = loadFont(display, screen, deriveSmallerFont(config.fontName))
 
-  # colours → pixels
   config.bgColor = parseColor(config.bgColorHex)
   config.fgColor = parseColor(config.fgColorHex)
   config.highlightBgColor = parseColor(config.highlightBgColorHex)
   config.highlightFgColor = parseColor(config.highlightFgColorHex)
   config.borderColor = parseColor(config.borderColorHex)
 
-  # window position
   var winX, winY: cint
   if config.centerWindow:
     let sw = XDisplayWidth(display, screen)
     let sh = XDisplayHeight(display, screen)
     winX = cint((sw - config.winWidth) div 2)
-    case config.verticalAlign
-    of "top":
-      winY = 50
-    of "center":
-      winY = cint((sh - config.winMaxHeight) div 2)
-    else:
-      winY = cint((sh - config.winMaxHeight) div 3)
+    winY = cint((sh - config.winMaxHeight) div 3)
   else:
     winX = cint(config.positionX)
     winY = cint(config.positionY)
@@ -155,42 +110,27 @@ proc initGui*() =
   let mask: culong = CWOverrideRedirect or CWBackPixel or CWEventMask
 
   window = XCreateWindow(
-    display,
-    XRootWindow(display, screen),
-    winX,
-    winY,
-    cuint(config.winWidth),
-    cuint(config.winMaxHeight),
-    0,
-    CopyFromParent,
-    InputOutput,
-    nil,
-    mask,
-    attrs.addr,
-  )
+    display, XRootWindow(display, screen), winX, winY,
+    cuint(config.winWidth), cuint(config.winMaxHeight),
+    0, CopyFromParent, InputOutput, nil, mask, attrs.addr)
+
   gc = XDefaultGC(display, screen)
 
   discard XMapWindow(display, window)
   discard XSetInputFocus(display, window, RevertToParent, CurrentTime)
   discard XFlush(display)
 
-  if not benchMode:                       # <── only create XftDraw if needed
-    xftDraw = XftDrawCreate(
-      display, window, DefaultVisual(display, screen), DefaultColormap(display, screen))
-    if xftDraw.isNil: quit "Failed to create XftDraw"
-    updateGuiColors()
-    echo "initGui(): main font = ", config.fontName,
-         " | overlay font = ", deriveSmallerFont(config.fontName)
+  xftDraw = XftDrawCreate(display, window, DefaultVisual(display, screen), DefaultColormap(display, screen))
+  if xftDraw.isNil:
+    quit "Failed to create XftDraw"
 
 #──────────────────────────────────────────────────────────────────────────────
-#  Text drawing
+#  Text Rendering
 #──────────────────────────────────────────────────────────────────────────────
+
 proc drawText*(txt: string, x, y: int, selected: bool) =
-  if font.isNil or xftDraw.isNil:
-    return
-
-  let fg = (if selected: xftColorHighlightFg.addr else: xftColorFg.addr)
-  let bg = (if selected: xftColorHighlightBg else: xftColorBg)
+  let fg = if selected: xftColorHighlightFg.addr else: xftColorFg.addr
+  let bg = if selected: xftColorHighlightBg else: xftColorBg
 
   let asc = font.ascent
   let desc = font.descent
@@ -200,65 +140,61 @@ proc drawText*(txt: string, x, y: int, selected: bool) =
   let marginW = config.winWidth - marginX * 2
 
   discard XSetForeground(display, gc, bg)
-  discard XFillRectangle(
-    display, window, gc, cint(marginX), cint(rectY), cuint(marginW), cuint(rectH)
-  )
+  discard XFillRectangle(display, window, gc, cint(marginX), cint(rectY), cuint(marginW), cuint(rectH))
 
-  XftDrawStringUtf8(
-    xftDraw, fg, font, cint(x), cint(y), cast[PFcChar8](txt[0].addr), txt.len.cint
-  )
+  XftDrawStringUtf8(xftDraw, fg, font, cint(x), cint(y), cast[PFcChar8](txt[0].addr), txt.len.cint)
 
 #──────────────────────────────────────────────────────────────────────────────
-#  Main redraw
+#  Overlay Text (Theme Indicator)
 #──────────────────────────────────────────────────────────────────────────────
+
+proc drawThemeOverlay(winW, winH: int) =
+  if lastThemeSwitchMs == 0 or overlayFont.isNil: return
+  let elapsed = nowMs() - lastThemeSwitchMs
+  if elapsed > OverlayDurationMs: return
+
+  var alpha = 1.0
+  if elapsed > OverlayDurationMs - FadeDurationMs:
+    alpha = 1.0 - (elapsed - (OverlayDurationMs - FadeDurationMs)).float / FadeDurationMs.float
+
+  let txt = currentThemeName
+  let txtW = overlayFont.textWidth(txt)
+  let txtH = overlayFont.ascent + overlayFont.descent
+  const pad = 6
+  let x = winW - txtW - pad - 4
+  let y = winH - txtH - pad - 4
+
+  discard XSetForeground(display, gc, xftColorBg)
+  discard XFillRectangle(display, window, gc, cint(x - 4), cint(y - 4), cuint(txtW + 8), cuint(txtH + 8))
+
+  XftDrawStringUtf8(xftDraw, xftColorFg.addr, overlayFont, cint(x), cint(y + overlayFont.ascent), cast[PFcChar8](txt[0].addr), txt.len.cint)
+
+#──────────────────────────────────────────────────────────────────────────────
+#  Redraw Entire Launcher Window
+#──────────────────────────────────────────────────────────────────────────────
+
 proc redrawWindow*() =
   discard XSetForeground(display, gc, config.bgColor)
-  discard XFillRectangle(
-    display, window, gc, 0, 0, cuint(config.winWidth), cuint(config.winMaxHeight)
-  )
+  discard XFillRectangle(display, window, gc, 0, 0, cuint(config.winWidth), cuint(config.winMaxHeight))
 
-  # border
   if config.borderWidth > 0:
     discard XSetForeground(display, gc, config.borderColor)
     for i in 0 ..< config.borderWidth:
-      discard XDrawRectangle(
-        display,
-        window,
-        gc,
-        cint(i),
-        cint(i),
-        cuint(config.winWidth - 1 - i * 2),
-        cuint(config.winMaxHeight - 1 - i * 2),
-      )
+      discard XDrawRectangle(display, window, gc, cint(i), cint(i), cuint(config.winWidth - 1 - i * 2), cuint(config.winMaxHeight - 1 - i * 2))
 
-  # prompt + input
   drawText(config.prompt & inputText & config.cursor, 20, 30, false)
 
-  # app list
   let listStartY = 30 + config.lineHeight
   for vis in 0 ..< config.maxVisibleItems:
     let idx = viewOffset + vis
-    if idx >= filteredApps.len:
-      break
+    if idx >= filteredApps.len: break
     let app = filteredApps[idx]
     let y = listStartY + vis * config.lineHeight
     let sel = idx == selectedIndex
     if sel:
       discard XSetForeground(display, gc, config.highlightBgColor)
-      discard XFillRectangle(
-        display,
-        window,
-        gc,
-        10,
-        cint(y - config.lineHeight + 5),
-        cuint(config.winWidth - 20),
-        cuint(config.lineHeight),
-      )
+      discard XFillRectangle(display, window, gc, 10, cint(y - config.lineHeight + 5), cuint(config.winWidth - 20), cuint(config.lineHeight))
     drawText(app.name, 20, y, sel)
 
   drawThemeOverlay(config.winWidth, config.winMaxHeight)
   discard XFlush(display)
-
-#──────────────────────────────────────────────────────────────────────────────
-#  End of gui.nim
-#──────────────────────────────────────────────────────────────────────────────
