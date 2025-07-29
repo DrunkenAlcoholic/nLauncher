@@ -1,5 +1,6 @@
+# src/state.nim
 ## state.nim — centralised data definitions & global state
-## GNU GPL v3 (or later); see LICENSE.
+## MIT; see LICENSE.
 ##
 ## This module is intentionally logic‑free.  It defines:
 ## • App/cache/config structures
@@ -17,7 +18,7 @@ type
     name*, exec*: string
     hasIcon*: bool               ## Whether an icon path exists.
 
-  ## Payload cached to `~/.cache/nim_launcher/apps.json`.
+  ## Payload cached to `~/.cache/nLauncher/apps.json`.
   CacheData* = object
     usrMtime*, localMtime*: int64
     apps*: seq[DesktopApp]
@@ -104,32 +105,32 @@ const
 
 const iniTemplate* = """
 [window]
-width              = 500
-max_visible_items  = 10
-center             = true
-position_x         = 20
-position_y         = 50
-vertical_align     = "one-third"
+width=500
+max_visible_items=10
+center=true
+position_x=20
+position_y=50
+vertical_align="one-third"
 
 [font]
-fontname = Noto Sans:size=12
+fontname="Noto Sans:size=12"
 
 [input]
-prompt   = "> "
-cursor   = "_"
+prompt="> "
+cursor="_"
 
 [terminal]
-program  = gnome-terminal
+program="gnome-terminal"
 
 [border]
-width    = 2
+width=2
 
 [colors]
-background           = "#2E3440"
-foreground           = "#D8DEE9"
-highlight_background = "#88C0D0"
-highlight_foreground = "#2E3440"
-border_color         = "#8BE9FD"
+background="#2E3440"
+foreground="#D8DEE9"
+highlight_background="#88C0D0"
+highlight_foreground="#2E3440"
+border_color="#8BE9FD"
 
 [theme]
 # Leaving this empty will use the colour scheme in the [colors] section. 

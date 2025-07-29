@@ -1,16 +1,14 @@
+# src/gui.nim
 #──────────────────────────────────────────────────────────────────────────────
 #  gui.nim — X11 / Xft drawing and window management
-#  GNU GPL v3 (or later); see LICENSE for details.
-#──────────────────────────────────────────────────────────────────────────────
-#  Imports
-#──────────────────────────────────────────────────────────────────────────────
+#  MIT; see LICENSE for details.
+
+# ── Imports ─────────────────────────────────────────────────────────────
 import std/[strutils, times, os]
 import x11/[xlib, xft, x, xrender]
 import ./[state, utils]          # display*, screen*, window*, gc*, config …
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Global Xft handles
-#──────────────────────────────────────────────────────────────────────────────
+# ── Global Xft handles ─────────────────────────────────────────────────────
 var
   font*: PXftFont                ## primary UI font (config.fontName)
   overlayFont*: PXftFont         ## smaller font for theme‑name overlay
@@ -19,9 +17,7 @@ var
   xftColorFg, xftColorHighlightFg: XftColor
   xftColorBg, xftColorHighlightBg: culong
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Theme‑overlay timing state
-#──────────────────────────────────────────────────────────────────────────────
+# ── Overlay timing state ─────────────────────────────────────────────────
 const
   FadeDurationMs* = 500
   OverlayFontDelta = 2           ## overlay size = main − 2
@@ -39,9 +35,8 @@ proc notifyThemeChanged*(name: string) =
   currentThemeName = name
   lastThemeSwitchMs = nowMs()
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Font helpers
-#──────────────────────────────────────────────────────────────────────────────
+# ── Font helpers ─────────────────────────────────────────────────────────
+## deriveSmallerFont returns a font string 2pt smaller than base.
 proc deriveSmallerFont(base: string): string =
   ## Derive a slightly smaller variant from *base* by decreasing `:size=`.
   const key = ":size="
@@ -116,10 +111,8 @@ proc drawThemeOverlay() =
     currentThemeName.len.cint
   )
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Initialisation
-#──────────────────────────────────────────────────────────────────────────────
-## Initialise X11 window, fonts, and colour resources.
+# ── Initialization ───────────────────────────────────────────────────────
+## initGui creates the X11 window, loads fonts, sets up colours.
 proc initGui*() =
   display = XOpenDisplay(nil)
   if display.isNil: quit "Cannot open X display"
@@ -208,7 +201,7 @@ proc initGui*() =
       )
   
     # ── Common setup ────────────────────────────────────────────────────────
-    discard XStoreName(display, window, "nim_launcher")
+    discard XStoreName(display, window, "nLauncher")
     discard XSelectInput(
       display, window,
       ExposureMask or KeyPressMask or KeyReleaseMask or
@@ -229,7 +222,8 @@ proc initGui*() =
       DefaultColormap(display, screen)
     )
 
-## Render *txt* at (x, y). Set `highlight = true` for selected row.
+# ── Drawing routines ─────────────────────────────────────────────────────
+## drawText renders `txt` at (x, y); highlight = true uses highlight colours.
 proc drawText*(txt: string; x, y: cint; highlight = false) =
   let fgCol = if highlight: xftColorHighlightFg else: xftColorFg
   let bgCol = if highlight: xftColorHighlightBg else: xftColorBg
@@ -249,12 +243,10 @@ proc drawText*(txt: string; x, y: cint; highlight = false) =
     txt.len.cint
   )
 
-#──────────────────────────────────────────────────────────────────────────────
-#  Main repaint entry
-#──────────────────────────────────────────────────────────────────────────────
-## Repaint entire launcher window including border.
+
+## redrawWindow clears and repaints all UI elements.
 proc redrawWindow*() =
-  # Background -----------------------------------------------------------
+  # Background ─────────────────────────────────────────────────────────────
   discard XSetForeground(display, gc, config.bgColor)
   discard XFillRectangle(
     display, window, gc,
@@ -263,14 +255,14 @@ proc redrawWindow*() =
     cuint(config.winMaxHeight)
   )
 
-  # Prompt ---------------------------------------------------------------
+  # Prompt ─────────────────────────────────────────────────────────────────
   var y: cint = font.ascent + 8
   let promptLine = config.prompt & inputText & (if benchMode: "" else: config.cursor)
   drawText(promptLine, 12, y)
   # add a small vertical gap before the list
   y += config.lineHeight.cint + 6
 
-  # Rows (with scrolling) ─────────────────────────────────────────────────
+  # Rows (with scrolling) ──────────────────────────────────────────────────
   let total   = filteredApps.len
   let maxRows = config.maxVisibleItems
   let start   = viewOffset
@@ -282,10 +274,10 @@ proc redrawWindow*() =
     drawText(app.name, 12, y, highlight)
     y += config.lineHeight.cint
 
-  # Theme overlay --------------------------------------------------------
+  # Theme overlay ────────────────────────────────────────────────────────────
   drawThemeOverlay()
 
-  # Border (draw last so nothing over‑paints it) ------------------------
+  # Border (draw last so nothing over‑paints it) ─────────────────────────────
   if config.borderWidth > 0:
     discard XSetForeground(display, gc, config.borderColor)
     for i in 0 ..< config.borderWidth:
@@ -296,5 +288,5 @@ proc redrawWindow*() =
         cuint(config.winMaxHeight - 1 - i * 2)
       )
 
-  # Finally flush all drawing commands
+  # Finally flush all drawing commands ────────────────────────────────────────
   discard XFlush(display)

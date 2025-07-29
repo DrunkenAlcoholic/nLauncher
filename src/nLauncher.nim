@@ -18,10 +18,15 @@ var
 proc runCommand(cmd: string) =
   ## Execute *cmd* in the chosen terminal, else headless.
   let term = chooseTerminal()
+  # Debug: show which terminal and command are being used
+  echo "DEBUG ▶ runCommand: term='", term, "' cmd='", cmd, "'"
+
   if term.len > 0:
+    echo "DEBUG ▶ launching via terminal: ", term, " -e sh -c ", cmd
     discard startProcess("/usr/bin/env",
       args = [term, "-e", "sh", "-c", cmd], options = {poDaemon})
   else:
+    echo "DEBUG ▶ launching via shell: /bin/sh -c ", cmd
     discard startProcess("/bin/sh",
       args = ["-c", cmd], options = {poDaemon})
 
@@ -77,7 +82,7 @@ proc cycleTheme(cfg: var Config) =
 proc loadApplications() =
   let usrDir   = "/usr/share/applications"
   let locDir   = getHomeDir() / ".local/share/applications"
-  let cacheDir  = getHomeDir() / ".cache" / "nim_launcher"
+  let cacheDir  = getHomeDir() / ".cache" / "nLauncher"
   let cacheFile = cacheDir / "apps.json"
 
   let usrM = if dirExists(usrDir): getLastModificationTime(usrDir).toUnix else: 0'i64
@@ -118,39 +123,6 @@ proc loadApplications() =
     except:
       echo "Warning: cache not saved."
 
-# ── Configuration loading ──────────────────────────────────────────────
-const iniTemplate = """
-[window]
-width             = 500
-max_visible_items = 10
-center            = true
-position_x        = 20
-position_y        = 50
-vertical_align    = "one-third"
-
-[font]
-fontname = "Noto Sans:size=12"
-
-[input]
-prompt = "> "
-cursor = "_"
-
-[terminal]
-program = "gnome-terminal"
-
-[border]
-width = 2
-
-[colors]
-background           = "#2E3440"
-foreground           = "#D8DEE9"
-highlight_background = "#88C0D0"
-highlight_foreground = "#2E3440"
-border_color         = "#8BE9FD"
-
-[theme]
-# name = "Ayu Dark"
-"""
 
 proc initLauncherConfig() =
   ## Defaults → override via config.ini
@@ -174,35 +146,55 @@ proc initLauncherConfig() =
   config.borderWidth         = 2
   config.themeName           = ""
 
-  let cfgPath = getHomeDir() / ".config" / "nim_launcher" / "config.ini"
+  let cfgPath = getHomeDir() / ".config" / "nLauncher" / "config.ini"
   if not fileExists(cfgPath):
     createDir(cfgPath.parentDir)
     writeFile(cfgPath, iniTemplate)
     echo "Created default config at ", cfgPath
 
+  # DEBUGGING: print out what config file we’re loading
+  #let cfgPath = getHomeDir() / ".config" / "nLauncher" / "config.ini"
+  #echo "DEBUG ▶ initLauncherConfig: cfgPath = ", cfgPath
+  #echo "DEBUG ▶ fileExists(cfgPath) = ", fileExists(cfgPath)
+  #if fileExists(cfgPath):
+  #  let raw = readFile(cfgPath)
+  #  echo "DEBUG ▶ raw config contents:\n", raw
+  #else:
+  #  echo "DEBUG ▶ config file not found, will create defaults"
+
+
   let ini = loadConfig(cfgPath)
-  for sec, tbl in ini:
-    for key, val in tbl:
-      if sec == "window":
+  # Debug: show parsed INI entries
+  for sec0, tbl in ini:
+    let sec = sec0.toLowerAscii.strip()
+    for key0, val in tbl:
+      let key = key0.toLowerAscii.strip()
+      #echo "DEBUG ▶ parsed ini section=\"", sec, "\" key=\"", key, "\" val=\"", val, "\""
+      case sec
+      of "window":
         case key
-        of "width":               config.winWidth        = val.parseInt
-        of "max_visible_items":   config.maxVisibleItems = val.parseInt
-        of "center":              config.centerWindow    = val.toLower == "true"
-        of "position_x":          config.positionX       = val.parseInt
-        of "position_y":          config.positionY       = val.parseInt
-        of "vertical_align":      config.verticalAlign   = val
+        of "width":             config.winWidth        = val.parseInt
+        of "max_visible_items": config.maxVisibleItems = val.parseInt
+        of "center":            config.centerWindow    = val.toLower == "true"
+        of "position_x":        config.positionX       = val.parseInt
+        of "position_y":        config.positionY       = val.parseInt
+        of "vertical_align":    config.verticalAlign   = val
         else: discard
-      elif sec == "font" and key == "fontname": config.fontName = val
-      elif sec == "input":
+      of "font":
+        if key == "fontname": config.fontName = val
+      of "input":
         case key
         of "prompt": config.prompt = val
         of "cursor": config.cursor = val
         else: discard
-      elif sec == "terminal" and key == "program":
-        config.terminalExe = val.strip(chars={'"','\''})
-      elif sec == "border" and key == "width":
-        config.borderWidth = val.parseInt
-      elif sec == "colors":
+      of "terminal":
+        if key == "program":
+          #echo "DEBUG ▶ reading terminal from config: ", cfgPath
+          config.terminalExe = val.strip(chars={'"','\''})
+          #echo "DEBUG ▶ config.terminalExe = '", config.terminalExe, "'"
+      of "border":
+        if key == "width": config.borderWidth = val.parseInt
+      of "colors":
         case key
         of "background":           config.bgColorHex          = val
         of "foreground":           config.fgColorHex          = val
@@ -210,8 +202,9 @@ proc initLauncherConfig() =
         of "highlight_foreground": config.highlightFgColorHex = val
         of "border_color":         config.borderColorHex      = val
         else: discard
-      elif sec == "theme" and key == "name":
-        config.themeName = val
+      of "theme":
+        if key == "name": config.themeName = val
+      else: discard
 
   if config.themeName.len > 0: applyTheme(config, config.themeName)
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
@@ -249,6 +242,7 @@ proc buildActions() =
                        exec:  "https://en.wikipedia.org/wiki/Special:Search?search=" & encodeUrl(q))
   elif inputText.startsWith("/") and inputText.len > 1:
     let cmd = inputText[1..^1].strip()
+    #echo "DEBUG ▶ slash-trigger detected, cmd = '", cmd, "'"   # ← debug print
     actions.add Action(kind: akRun, label: "Run: " & cmd, exec: cmd)
   else:
     if inputText.len == 0:
@@ -284,6 +278,7 @@ proc buildActions() =
 proc performAction(a: Action) =
   case a.kind
   of akRun:
+    #echo "DEBUG ▶ about to run: ", a.exec
     runCommand(a.exec)
   of akYouTube, akGoogle, akWiki:
     openUrl(a.exec)

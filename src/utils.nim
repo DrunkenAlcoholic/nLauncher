@@ -1,5 +1,6 @@
+# src/utils.nim
 ## utils.nim — shared helper routines
-## GNU GPL v3 (or later); see LICENSE for details.
+## MIT; see LICENSE for details.
 ##
 ## This unit is *side‑effect‑free* except for:
 ##   • colour allocation on an open X11 display
@@ -13,30 +14,30 @@ import x11/[xlib, x, xft, xrender]
 import state           # display*, screen*, config, fallbackTerms, recentApps
 
 # ── Executable discovery ────────────────────────────────────────────────
-proc exeExists*(exe: string): bool =
-  ## Return `true` if *exe* is runnable (absolute path or on $PATH).
-  let clean = exe.strip(chars = {'"', '\''})
-  if '/' in clean:
-    return fileExists(clean)
-  for dir in getEnv("PATH", "").split(':'):
-    if fileExists(dir / clean):
+## Returns true if an executable *name* can be found in $PATH.
+proc whichExists*(name: string): bool =
+  for dir in getEnv("PATH").split(':'):
+    if fileExists(dir / name):
       return true
-  false
+  return false
 
+## Pick a terminal emulator: prefer config.terminalExe, then fallbacks.
 proc chooseTerminal*(): string =
-  ## Select the first working terminal, respecting:
-  ##   1. `config.terminalExe`
-  ##   2. `$TERMINAL`
-  ##   3. hard‑coded `fallbackTerms`
-  if config.terminalExe.len > 0 and exeExists(config.terminalExe):
+  ## Debug: show what we read from config
+  echo "DEBUG ▶ chooseTerminal: config.terminalExe = '", config.terminalExe, "'"
+  # 1) if user explicitly set a terminal, trust it
+  if config.terminalExe.len > 0:
     return config.terminalExe
-  let envT = getEnv("TERMINAL", "")
-  if envT.len > 0 and exeExists(envT):
-    return envT
-  for t in fallbackTerms:
-    if exeExists(t):
+
+  # 2) otherwise, pick from known list
+  for t in @["kitty", "alacritty", "gnome-terminal", "xterm", "urxvt"]:
+    if whichExists(t):
+      echo "DEBUG ▶ chooseTerminal: falling back to '", t, "'"
       return t
-  ""
+
+  # 3) nothing found → headless
+  echo "DEBUG ▶ chooseTerminal: no terminal found, running headless"
+  return ""
 
 # ── Timing helper (for --bench mode) ────────────────────────────────────
 template timeIt*(msg: string, body: untyped) =
@@ -87,7 +88,7 @@ proc allocXftColor*(hex: string, dest: var XftColor) =
     quit "XftColorAllocValue failed for " & hex
 
 # ── Recent‑apps persistence ─────────────────────────────────────────────
-let recentFile* = getHomeDir() / ".cache" / "nim_launcher" / "recent.json"
+let recentFile* = getHomeDir() / ".cache" / "nLauncher" / "recent.json"
 
 proc loadRecent*() =
   ## Populate `state.recentApps` from disk; silent on error.
