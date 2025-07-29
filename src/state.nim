@@ -93,6 +93,7 @@ var
   shouldExit*:    bool
   benchMode*:     bool = false      ## `--bench` flag (minimal redraws)
   recentApps*:    seq[string]       ## Most‑recent‑first app names
+  seenMapNotify*:  bool = false     ## swallow first FocusOut after map
 
 # ── Constants ───────────────────────────────────────────────────────────
 const

@@ -350,14 +350,31 @@ proc main() =
     var ev: XEvent
     discard XNextEvent(display, ev.addr)
     case ev.theType
-    of Expose:            gui.redrawWindow()
-    of KeyPress:          
-      handleKeyPress(ev); 
-      if not shouldExit: 
+  
+    of MapNotify:
+      # window was just mapped; next FocusOut is spurious → swallow it
+      if ev.xmap.window == window:
+        seenMapNotify = true
+  
+    of Expose:
+      gui.redrawWindow()
+  
+    of KeyPress:
+      handleKeyPress(ev)
+      if not shouldExit:
         gui.redrawWindow()
-    of FocusOut:          shouldExit = true
-    else: discard
-
+  
+    of FocusOut:
+      if seenMapNotify:
+        # discard this one, reset flag
+        seenMapNotify = false
+      else:
+        # real blur → exit
+        shouldExit = true
+  
+    else:
+      discard
+  
   discard XDestroyWindow(display, window)
   discard XCloseDisplay(display)
 
