@@ -124,6 +124,7 @@ proc initGui*() =
   display = XOpenDisplay(nil)
   if display.isNil: quit "Cannot open X display"
   screen = XDefaultScreen(display)
+  
   # Fonts ----------------------------------------------------------------
   font         = loadFont(display, screen, config.fontName)
   overlayFont  = loadFont(display, screen, deriveSmallerFont(config.fontName))
@@ -134,62 +135,64 @@ proc initGui*() =
   config.highlightBgColor = parseColor(config.highlightBgColorHex)
   config.highlightFgColor = parseColor(config.highlightFgColorHex)
   config.borderColor     = parseColor(config.borderColorHex)
-  updateGuiColors()
+  timeIt "UpdateGuiColors" :
+    updateGuiColors()
 
-  # Window geometry ------------------------------------------------------
-  var winX, winY: cint
-  if config.centerWindow:
-    let sw = XDisplayWidth(display, screen)
-    let sh = XDisplayHeight(display, screen)
-    winX = cint((sw - config.winWidth) div 2)
-    case config.verticalAlign
-    of "top":      winY = 50
-    of "center":   winY = cint((sh - config.winMaxHeight) div 2)
-    else:          winY = cint(sh div 3)                # "one‑third"
-  else:
-    winX = cint(config.positionX)
-    winY = cint(config.positionY)
-
-  var attrs: XSetWindowAttributes
-  attrs.override_redirect = 1
-  attrs.background_pixel  = config.bgColor
-  attrs.border_pixel      = config.borderColor
-
-  let valueMask = culong(CWOverrideRedirect or CWBackPixel or CWBorderPixel)
-
-  window = XCreateWindow(
-    display,
-    XRootWindow(display, screen),
-    winX, winY,
-    cuint(config.winWidth),
-    cuint(config.winMaxHeight),
-    cuint(config.borderWidth),
-    DefaultDepth(display, screen).cint,   # depth → cint
-    cuint(InputOutput),                   # class → cuint
-    DefaultVisual(display, screen),
-    valueMask,                            # valuemask → culong
-    cast[PXSetWindowAttributes](addr attrs)
-  )
-
-  discard XStoreName(display, window, "nim_launcher")
-  discard XSelectInput(display, window,
-               ExposureMask or KeyPressMask or KeyReleaseMask or
-               FocusChangeMask or StructureNotifyMask)
-  discard XMapWindow(display, window)
-  discard XFlush(display)
-
-  # Give our window the keyboard focus so we’ll see FocusOut when it blurs
-  discard XSetInputFocus(
-    display,
-    window,
-    RevertToParent,
-    CurrentTime
-  )
-
-  gc      = XCreateGC(display, window, 0, nil)
-  xftDraw = XftDrawCreate(display, window,
-                          DefaultVisual(display, screen),
-                          DefaultColormap(display, screen))
+  timeIt "Create Window" :
+    # Window geometry ------------------------------------------------------
+    var winX, winY: cint
+    if config.centerWindow:
+      let sw = XDisplayWidth(display, screen)
+      let sh = XDisplayHeight(display, screen)
+      winX = cint((sw - config.winWidth) div 2)
+      case config.verticalAlign
+      of "top":      winY = 50
+      of "center":   winY = cint((sh - config.winMaxHeight) div 2)
+      else:          winY = cint(sh div 3)                # "one‑third"
+    else:
+      winX = cint(config.positionX)
+      winY = cint(config.positionY)
+  
+    var attrs: XSetWindowAttributes
+    attrs.override_redirect = 1
+    attrs.background_pixel  = config.bgColor
+    attrs.border_pixel      = config.borderColor
+  
+    let valueMask = culong(CWOverrideRedirect or CWBackPixel or CWBorderPixel)
+  
+    window = XCreateWindow(
+      display,
+      XRootWindow(display, screen),
+      winX, winY,
+      cuint(config.winWidth),
+      cuint(config.winMaxHeight),
+      cuint(config.borderWidth),
+      DefaultDepth(display, screen).cint,   # depth → cint
+      cuint(InputOutput),                   # class → cuint
+      DefaultVisual(display, screen),
+      valueMask,                            # valuemask → culong
+      cast[PXSetWindowAttributes](addr attrs)
+    )
+  
+    discard XStoreName(display, window, "nim_launcher")
+    discard XSelectInput(display, window,
+                 ExposureMask or KeyPressMask or KeyReleaseMask or
+                 FocusChangeMask or StructureNotifyMask)
+    discard XMapWindow(display, window)
+    discard XFlush(display)
+  
+    # Give our window the keyboard focus so we’ll see FocusOut when it blurs
+    discard XSetInputFocus(
+      display,
+      window,
+      RevertToParent,
+      CurrentTime
+    )
+  
+    gc      = XCreateGC(display, window, 0, nil)
+    xftDraw = XftDrawCreate(display, window,
+                            DefaultVisual(display, screen),
+                            DefaultColormap(display, screen))
 
 ## Render *txt* at (x, y). Set `highlight = true` for selected row.
 proc drawText*(txt: string; x, y: cint; highlight = false) =
