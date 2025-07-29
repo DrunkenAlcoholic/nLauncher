@@ -1,5 +1,5 @@
-## nim_launcher.nim — main program with Action abstraction and fixes
-## GNU GPL v3 (or later). Requires Nim ≥ 2.0, x11 & xft Nimble packages.
+## nLauncher.nim — main program with Action abstraction and fixes
+## MIT Licence. Requires Nim ≥ 2.0, x11 & xft Nimble packages.
 ## Startup in --bench mode still completes in ~1–2 ms on a modern system.
 
 # ── Imports ─────────────────────────────────────────────────────────────

@@ -1,7 +1,7 @@
-version       = "1.0.0"
+version       = "0.2.0"
 author        = "DrunkenAlcoholic"
 description   = "A simple, fast, and highly configurable application launcher for X11"
-license       = "GPL v3" 
+license       = "MIT" 
 srcDir        = "src" 
 
 # Dependencies
@@ -9,7 +9,7 @@ requires "nim >= 2.0.0"
 requires "x11"
 
 
-bin = @["nim_launcher"]
+bin = @["nLauncher"]
 
 # Custom tasks are still great for things like linting.
 task lint, "Lint all *.nim files":
