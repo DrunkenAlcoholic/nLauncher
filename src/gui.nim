@@ -4,7 +4,7 @@
 #──────────────────────────────────────────────────────────────────────────────
 #  Imports
 #──────────────────────────────────────────────────────────────────────────────
-import strutils, times
+import std/[strutils, times, os]
 import x11/[xlib, xft, x, xrender]
 import ./[state, utils]          # display*, screen*, window*, gc*, config …
 
@@ -153,13 +153,24 @@ proc initGui*() =
       winX = cint(config.positionX)
       winY = cint(config.positionY)
   
+    #var attrs: XSetWindowAttributes
+    #attrs.override_redirect = 1
+    #attrs.background_pixel  = config.bgColor
+    #attrs.border_pixel      = config.borderColor
+  
+    #let valueMask = culong(CWOverrideRedirect or CWBackPixel or CWBorderPixel)
+  
     var attrs: XSetWindowAttributes
-    attrs.override_redirect = 1
-    attrs.background_pixel  = config.bgColor
-    attrs.border_pixel      = config.borderColor
-  
-    let valueMask = culong(CWOverrideRedirect or CWBackPixel or CWBorderPixel)
-  
+    let isWayland = getEnv("WAYLAND_DISPLAY") != ""
+    attrs.override_redirect = if isWayland: 0 else: 1
+    attrs.background_pixel = config.bgColor
+    attrs.border_pixel     = config.borderColor
+
+    let valueMask = culong(
+      CWBackPixel or CWBorderPixel or
+      (if not isWayland: CWOverrideRedirect else: 0)
+    )
+
     window = XCreateWindow(
       display,
       XRootWindow(display, screen),

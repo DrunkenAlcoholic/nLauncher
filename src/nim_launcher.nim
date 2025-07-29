@@ -349,6 +349,7 @@ proc main() =
 
   updateParsedColors(config)
   gui.updateGuiColors()
+  gui.redrawWindow()
 
   while not shouldExit:
     var ev: XEvent
