@@ -31,7 +31,8 @@ proc whichExists*(name: string): bool =
       return true
   return false
 
-## Pick a terminal emulator: prefer config.terminalExe, then fallbacks.
+## Pick a terminal emulator: prefer `config.terminalExe`, then `$TERMINAL`,
+## otherwise iterate over `fallbackTerms` from `state.nim`.
 proc chooseTerminal*(): string =
   ## Debug: show what we read from config
   echo "DEBUG ▶ chooseTerminal: config.terminalExe = '", config.terminalExe, "'"
@@ -39,13 +40,19 @@ proc chooseTerminal*(): string =
   if config.terminalExe.len > 0:
     return config.terminalExe
 
-  # 2) otherwise, pick from known list
+  # 2) if $TERMINAL is set and executable, use it
+  let envTerm = getEnv("TERMINAL")
+  if envTerm.len > 0 and (fileExists(envTerm) or whichExists(envTerm)):
+    echo "DEBUG  chooseTerminal: using $TERMINAL='", envTerm, "'"
+    return envTerm
+
+  # 3) otherwise, pick from known list
   for t in fallbackTerms:
     if whichExists(t):
       echo "DEBUG ▶ chooseTerminal: falling back to '", t, "'"
       return t
 
-  # 3) nothing found → headless
+  # 4) nothing found → headless
   echo "DEBUG ▶ chooseTerminal: no terminal found, running headless"
   return ""
 
