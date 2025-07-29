@@ -153,57 +153,81 @@ proc initGui*() =
       winX = cint(config.positionX)
       winY = cint(config.positionY)
   
-    #var attrs: XSetWindowAttributes
-    #attrs.override_redirect = 1
-    #attrs.background_pixel  = config.bgColor
-    #attrs.border_pixel      = config.borderColor
-  
-    #let valueMask = culong(CWOverrideRedirect or CWBackPixel or CWBorderPixel)
-  
+    # ── Set up window attributes ──────────────────────────────────────────
     var attrs: XSetWindowAttributes
     let isWayland = getEnv("WAYLAND_DISPLAY") != ""
     attrs.override_redirect = if isWayland: 0 else: 1
-    attrs.background_pixel = config.bgColor
-    attrs.border_pixel     = config.borderColor
-
+    attrs.background_pixel  = config.bgColor
+    attrs.border_pixel      = config.borderColor
+  
+    # Build the valuemask (must be culong)
     let valueMask = culong(
       CWBackPixel or CWBorderPixel or
       (if not isWayland: CWOverrideRedirect else: 0)
     )
-
+  
+    # ── Create the window ─────────────────────────────────────────────────
     window = XCreateWindow(
       display,
       XRootWindow(display, screen),
-      winX, winY,
+      winX.cint, winY.cint,
       cuint(config.winWidth),
       cuint(config.winMaxHeight),
       cuint(config.borderWidth),
-      DefaultDepth(display, screen).cint,   # depth → cint
-      cuint(InputOutput),                   # class → cuint
+      DefaultDepth(display, screen).cint,
+      cuint(InputOutput),
       DefaultVisual(display, screen),
-      valueMask,                            # valuemask → culong
+      valueMask,
       cast[PXSetWindowAttributes](addr attrs)
     )
   
+    # ── Under Wayland/Xwayland: mark floating + remove decorations ────────
+    if isWayland:
+      # 1) _NET_WM_WINDOW_TYPE_DIALOG → floating
+      let wmTypeAtom = XInternAtom(display, "_NET_WM_WINDOW_TYPE", 0)
+      let dialogAtom = XInternAtom(display, "_NET_WM_WINDOW_TYPE_DIALOG", 0)
+      let atomAtom   = XInternAtom(display, "ATOM", 0)
+      discard XChangeProperty(
+        display, window,
+        wmTypeAtom, atomAtom,
+        32.cint, PropModeReplace,
+        cast[Pcuchar](addr dialogAtom), 1.cint
+      )
+  
+      # 2) Motif hints → strip all decorations
+      const MWM_HINTS_DECORATIONS = 2'u32
+      let mwmHintsAtom = XInternAtom(display, "_MOTIF_WM_HINTS", 0)
+      var mwmHints: array[5, uint64]
+      mwmHints[0] = MWM_HINTS_DECORATIONS  # flags → we’re only touching decorations
+      mwmHints[2] = 0'u64                 # decorations = 0 (none)
+      discard XChangeProperty(
+        display, window,
+        mwmHintsAtom, mwmHintsAtom,
+        32.cint, PropModeReplace,
+        cast[Pcuchar](addr mwmHints), mwmHints.len.cint
+      )
+  
+    # ── Common setup ────────────────────────────────────────────────────────
     discard XStoreName(display, window, "nim_launcher")
-    discard XSelectInput(display, window,
-                 ExposureMask or KeyPressMask or KeyReleaseMask or
-                 FocusChangeMask or StructureNotifyMask)
+    discard XSelectInput(
+      display, window,
+      ExposureMask or KeyPressMask or KeyReleaseMask or
+      FocusChangeMask or StructureNotifyMask
+    )
     discard XMapWindow(display, window)
     discard XFlush(display)
   
-    # Give our window the keyboard focus so we’ll see FocusOut when it blurs
-    discard XSetInputFocus(
-      display,
-      window,
-      RevertToParent,
-      CurrentTime
-    )
+    # ── Focus handling ─────────────────────────────────────────────────────
+    if not isWayland:
+      discard XSetInputFocus(display, window, RevertToParent, CurrentTime)
   
+    # ── Create graphics contexts ──────────────────────────────────────────
     gc      = XCreateGC(display, window, 0, nil)
-    xftDraw = XftDrawCreate(display, window,
-                            DefaultVisual(display, screen),
-                            DefaultColormap(display, screen))
+    xftDraw = XftDrawCreate(
+      display, window,
+      DefaultVisual(display, screen),
+      DefaultColormap(display, screen)
+    )
 
 ## Render *txt* at (x, y). Set `highlight = true` for selected row.
 proc drawText*(txt: string; x, y: cint; highlight = false) =
@@ -233,19 +257,27 @@ proc redrawWindow*() =
   # Background -----------------------------------------------------------
   discard XSetForeground(display, gc, config.bgColor)
   discard XFillRectangle(
-    display, window, gc, 0, 0,
-    cuint(config.winWidth), cuint(config.winMaxHeight)
+    display, window, gc,
+    0, 0,
+    cuint(config.winWidth),
+    cuint(config.winMaxHeight)
   )
 
   # Prompt ---------------------------------------------------------------
   var y: cint = font.ascent + 8
   let promptLine = config.prompt & inputText & (if benchMode: "" else: config.cursor)
   drawText(promptLine, 12, y)
-  y += config.lineHeight.cint + 6       # advance for app rows
+  # add a small vertical gap before the list
+  y += config.lineHeight.cint + 6
 
-  # Rows -----------------------------------------------------------------
-  for idx, app in filteredApps:
-    if y > config.winMaxHeight: break
+  # Rows (with scrolling) ─────────────────────────────────────────────────
+  let total   = filteredApps.len
+  let maxRows = config.maxVisibleItems
+  let start   = viewOffset
+  let finish  = min(viewOffset + maxRows, total)
+
+  for idx in start ..< finish:
+    let app       = filteredApps[idx]
     let highlight = (idx == selectedIndex)
     drawText(app.name, 12, y, highlight)
     y += config.lineHeight.cint
@@ -253,7 +285,7 @@ proc redrawWindow*() =
   # Theme overlay --------------------------------------------------------
   drawThemeOverlay()
 
-  # ── Border LAST so nothing over‑paints it ─────────────────────────────
+  # Border (draw last so nothing over‑paints it) ------------------------
   if config.borderWidth > 0:
     discard XSetForeground(display, gc, config.borderColor)
     for i in 0 ..< config.borderWidth:
@@ -264,6 +296,5 @@ proc redrawWindow*() =
         cuint(config.winMaxHeight - 1 - i * 2)
       )
 
+  # Finally flush all drawing commands
   discard XFlush(display)
-
-
