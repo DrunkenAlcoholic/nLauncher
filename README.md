@@ -37,10 +37,10 @@
 ### Build
 
 ```bash
-git clone https://github.com/DrunkenAlcoholic/nim_launcher.git
-cd nim_launcher
+git clone https://github.com/DrunkenAlcoholic/nLauncher.git
+cd nLauncher
 nimble install x11            # one‑time; pulls Nim X11 bindings
-nimble build -d:release       # creates ./nim_launcher
+nimble build -d:release       # creates ./nLauncher
 ```
 
 ### Bind to a hotkey
@@ -48,7 +48,7 @@ nimble build -d:release       # creates ./nim_launcher
 Example (i3 WM):
 
 ```ini
-bindsym $mod+d exec --no-startup-id nim_launcher
+bindsym $mod+d exec --no-startup-id nLauncher
 ```
 
 ---
@@ -71,12 +71,12 @@ bindsym $mod+d exec --no-startup-id nim_launcher
 Bench start‐time:
 
 ```bash
-nim_launcher --bench      # prints time & exits, used by hyperfine
+nLauncher --bench      # prints time & exits, also used to close window for hyperfine
 ```
 
 ---
 
-## Configuration (`~/.config/nim_launcher/config.ini`)
+## Configuration (`~/.config/nLauncher/config.ini`)
 
 <details>
 <summary>Click to expand</summary>
@@ -157,5 +157,5 @@ Cycle live with <kbd>F5</kbd>.
 _Written & maintained by @DrunkenAlcoholic._
 ChatGPT assisted in refactors, edge‑case handling, and this README.
 
-Licensed under **GPL‑3.0**.
+Licensed under **MIT**.
 Enjoy launching at ludicrous speed 🚀
