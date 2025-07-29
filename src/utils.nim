@@ -43,7 +43,10 @@ template timeIt*(msg: string, body: untyped) =
   ## Inline timing macro — prints *msg* and elapsed seconds.
   let t0 = epochTime()
   body
-  echo msg, " ", ((epochTime() - t0) * 1000).round, " ms"
+  # compute elapsed milliseconds
+  let elapsed = (epochTime() - t0) * 1000.0
+  # format with fixed 3 decimal places
+  echo msg, " ", elapsed.formatFloat(ffDecimal, 3), " ms"
 
 # ── Colour utilities (used by gui & launcher) ───────────────────────────
 proc parseColor*(hex: string): culong =

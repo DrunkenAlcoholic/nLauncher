@@ -215,7 +215,6 @@ proc initLauncherConfig() =
 
   if config.themeName.len > 0: applyTheme(config, config.themeName)
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
-  echo "Font → ", config.fontName
 
 # ── Fuzzy match helper ─────────────────────────────────────────────────
 proc betterFuzzyMatch(q, t: string): bool =
@@ -332,14 +331,22 @@ proc handleKeyPress(ev: var XEvent) =
 # ── Main loop ───────────────────────────────────────────────────────────
 proc main() =
   benchMode = "--bench" in commandLineParams()
-  initLauncherConfig()
-  loadApplications()
-  loadRecent()
-  buildActions()
+  timeIt "Init Config:" :
+    initLauncherConfig()
+  timeIt "Load Applications:" :
+    loadApplications()
+  timeIt "Load Recent Apps:" :
+    loadRecent()
+  timeIt "Build Actions:" :
+    buildActions()
   initGui()
+
+  # Benchmark the time it takes to redraw 1 frame
   if benchMode:
-    gui.redrawWindow()
+    timeIt "Benchmark:" :
+      gui.redrawWindow()
     quit 0
+
   updateParsedColors(config)
   gui.updateGuiColors()
 
