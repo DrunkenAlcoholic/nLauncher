@@ -129,7 +129,9 @@ Leave blank to honour `[colors]`.
 program = alacritty
 ```
 
-If empty, `$TERMINAL` env or a fallback list (`kitty`, `wezterm`, `xterm`…) is used.
+If left blank, the launcher checks `$TERMINAL` first then falls back to
+`kitty`, `alacritty`, `wezterm`, `foot`, `gnome-terminal`, `konsole`,
+`xfce4-terminal` and finally `xterm`.
 
 </details>
 
