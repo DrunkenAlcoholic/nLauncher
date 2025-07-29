@@ -14,4 +14,4 @@ bin = @["nLauncher"]
 # Custom tasks are still great for things like linting.
 task lint, "Lint all *.nim files":
   # A more precise glob pattern for your source files
-  exec "nimpretty --indent:2 --maxLineLen:106 scr/**/*.nim"
+  exec "nimpretty --indent:2 --maxLineLen:106 src/**/*.nim"
