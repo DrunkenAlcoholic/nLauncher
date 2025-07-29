@@ -43,7 +43,7 @@ proc scanConfigFiles*(query: string): seq[DesktopApp] =
     if fileExists(path) and path.extractFilename.toLower.contains(query.toLower):
       result.add DesktopApp(
         name:     path.extractFilename,
-        exec:     "xdg-open '" & path & "'",
+        exec:     "xdg-open " & shellQuote(path),
         hasIcon:  false
       )
 

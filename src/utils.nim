@@ -13,6 +13,16 @@ import std/[os, strutils, times, json, math]
 import x11/[xlib, x, xft, xrender]
 import state           # display*, screen*, config, fallbackTerms, recentApps
 
+## Quote *s* for safe use inside a shell command.
+proc shellQuote*(s: string): string =
+  result = "'"
+  for ch in s:
+    if ch == '\'':
+      result.add("'\\''")
+    else:
+      result.add(ch)
+  result.add("'")
+
 # ── Executable discovery ────────────────────────────────────────────────
 ## Returns true if an executable *name* can be found in $PATH.
 proc whichExists*(name: string): bool =
@@ -30,7 +40,7 @@ proc chooseTerminal*(): string =
     return config.terminalExe
 
   # 2) otherwise, pick from known list
-  for t in @["kitty", "alacritty", "gnome-terminal", "xterm", "urxvt"]:
+  for t in fallbackTerms:
     if whichExists(t):
       echo "DEBUG ▶ chooseTerminal: falling back to '", t, "'"
       return t
