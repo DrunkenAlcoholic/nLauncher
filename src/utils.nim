@@ -35,7 +35,7 @@ proc whichExists*(name: string): bool =
 ## otherwise iterate over `fallbackTerms` from `state.nim`.
 proc chooseTerminal*(): string =
   ## Debug: show what we read from config
-  echo "DEBUG ▶ chooseTerminal: config.terminalExe = '", config.terminalExe, "'"
+  #echo "DEBUG ▶ chooseTerminal: config.terminalExe = '", config.terminalExe, "'"
   # 1) if user explicitly set a terminal, trust it
   if config.terminalExe.len > 0:
     return config.terminalExe
@@ -43,17 +43,17 @@ proc chooseTerminal*(): string =
   # 2) if $TERMINAL is set and executable, use it
   let envTerm = getEnv("TERMINAL")
   if envTerm.len > 0 and (fileExists(envTerm) or whichExists(envTerm)):
-    echo "DEBUG  chooseTerminal: using $TERMINAL='", envTerm, "'"
+    #echo "DEBUG  chooseTerminal: using $TERMINAL='", envTerm, "'"
     return envTerm
 
   # 3) otherwise, pick from known list
   for t in fallbackTerms:
     if whichExists(t):
-      echo "DEBUG ▶ chooseTerminal: falling back to '", t, "'"
+      #echo "DEBUG ▶ chooseTerminal: falling back to '", t, "'"
       return t
 
   # 4) nothing found → headless
-  echo "DEBUG ▶ chooseTerminal: no terminal found, running headless"
+  #echo "DEBUG ▶ chooseTerminal: no terminal found, running headless"
   return ""
 
 # ── Timing helper (for --bench mode) ────────────────────────────────────
@@ -86,6 +86,7 @@ proc parseColor*(hex: string): culong =
     result = c.pixel
   except:
     result = 0               # invalid hex, parseHexInt overflow…
+
 
 proc allocXftColor*(hex: string, dest: var XftColor) =
   ## Allocate an XftColor for the current `display`/`screen`.

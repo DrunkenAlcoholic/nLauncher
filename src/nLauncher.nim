@@ -7,7 +7,6 @@
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, osproc, strutils, options, tables, sequtils,
              json, times, editdistance, uri, sets, algorithm]
-#import parsecfg except Config
 import parsetoml as toml
 import x11/[xlib, x, xutil, keysym]
 import ./[state, parser, gui, utils]
@@ -22,14 +21,14 @@ proc runCommand(cmd: string) =
   ## Execute *cmd* in the chosen terminal, else headless.
   let term = chooseTerminal()
   # Debug: show which terminal and command are being used
-  echo "DEBUG ▶ runCommand: term='", term, "' cmd='", cmd, "'"
+  #echo "DEBUG ▶ runCommand: term='", term, "' cmd='", cmd, "'"
 
   if term.len > 0:
-    echo "DEBUG ▶ launching via terminal: ", term, " -e sh -c ", cmd
+    #echo "DEBUG ▶ launching via terminal: ", term, " -e sh -c ", cmd
     discard startProcess("/usr/bin/env",
       args = [term, "-e", "sh", "-c", cmd], options = {poDaemon})
   else:
-    echo "DEBUG ▶ launching via shell: /bin/sh -c ", cmd
+    #echo "DEBUG ▶ launching via shell: /bin/sh -c ", cmd
     discard startProcess("/bin/sh",
       args = ["-c", cmd], options = {poDaemon})
 
@@ -37,7 +36,6 @@ proc openUrl(url: string) =
   ## Open *url* via `xdg-open` in the background using the shell.
   discard startProcess("/bin/sh",
     args = @["-c", "xdg-open \"" & url & "\" &"], options = {poDaemon})
-
 
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return config files matching *query*.
@@ -298,10 +296,11 @@ proc performAction(a: Action) =
   of akYouTube, akGoogle, akWiki:
     openUrl(a.exec)
   of akConfig, akApp:
-    if a.kind == akConfig:
-      discard startProcess("/bin/sh", args = ["-c", a.exec], options={poDaemon})
-    else:
-      discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()], options={poDaemon})
+    discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()], options={poDaemon})
+    #if a.kind == akConfig:
+    #  discard startProcess("/bin/sh", args = ["-c", a.exec], options={poDaemon})
+    #else:
+    #  discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()], options={poDaemon})
     if a.kind == akApp:
       if a.label in recentApps:
         recentApps.delete(recentApps.find(a.label))

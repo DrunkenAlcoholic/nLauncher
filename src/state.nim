@@ -47,15 +47,6 @@ type
     # Resolved X pixel colours (set once the X connection is live)
     bgColor*, fgColor*, highlightBgColor*, highlightFgColor*, borderColor*: culong
 
-  ## Input‑mode state, determined from the leading input prefix.
-  InputMode* = enum
-    imNormal         ## plain application search
-    imRunCommand     ## "/<cmd>"
-    imConfigSearch   ## "/c <query>"
-    imYouTube        ## "/y <query>"
-    imGoogle         ## "/g <query>"
-    imWiki           ## "/w <query>"
-
 
 type
   ## What kind of thing the user can pick.
@@ -90,7 +81,6 @@ var
   window*:   Window
   gc*:       GC
   screen*:   cint
-  inputMode*: InputMode
 
 # ── Runtime state ───────────────────────────────────────────────────────
 var

@@ -23,7 +23,7 @@ const
 
 var
   lastThemeSwitchMs*: int64 = 0
-  currentThemeName*: string = ""
+  currentThemeName: string = ""
 
 ## Return current time in milliseconds since Unix epoch.
 proc nowMs*(): int64 =
@@ -121,12 +121,6 @@ proc initGui*() =
   font         = loadFont(display, screen, config.fontName)
   overlayFont  = loadFont(display, screen, deriveSmallerFont(config.fontName))
 
-  # Colours --------------------------------------------------------------
-  config.bgColor         = parseColor(config.bgColorHex)
-  config.fgColor         = parseColor(config.fgColorHex)
-  config.highlightBgColor = parseColor(config.highlightBgColorHex)
-  config.highlightFgColor = parseColor(config.highlightFgColorHex)
-  config.borderColor     = parseColor(config.borderColorHex)
   timeIt "UpdateGuiColors" :
     updateGuiColors()
 
