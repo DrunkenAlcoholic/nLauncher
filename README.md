@@ -87,25 +87,25 @@ Copy & paste this skeleton or edit in place:
 # nlauncher.toml
 
 [window]
-width               = 600
-max_visible_items   = 12
-center              = true
-position_x          = 20
-position_y          = 50
-vertical_align      = "one-third"
+width               = 500                  # Width of the launcher window
+max_visible_items   = 10                   # Number of rows visible at once
+center              = true                # If true use `vertical_align`; false uses `position_x`/`position_y`
+position_x          = 20                  # X offset when `center` is false
+position_y          = 50                  # Y offset when `center` is false
+vertical_align      = "one-third"         # "top", "center" or "one-third" when centered
 
 [font]
-fontname = "JetBrainsMono:size=14"
+fontname = "Noto Sans:size=12"            # Font to use for all text
 
 [input]
-prompt = "> "
-cursor = "_"
+prompt   = "> "                       # Prompt prefix on the input line
+cursor   = "_"                        # Cursor character under typed text
 
 [terminal]
-program = "kitty"
+program  = "kitty"                   # Terminal program for `/` commands
 
 [border]
-width = 2
+width    = 2                         # Border thickness in pixels (0 disables)
 
 # ── Available themes ───────────────────────────────────────────────────────
 [[themes]]
@@ -130,6 +130,23 @@ borderColorHex         = "#44475A"
 [theme]
 last_chosen = "Nord"
 ```
+
+### Config option reference
+
+| Key                               | Purpose |
+|-----------------------------------|---------|
+| `[window].width`                  | Width of the launcher window in pixels |
+| `[window].max_visible_items`      | Maximum rows visible in the list |
+| `[window].center`                 | Center the window horizontally and use `vertical_align` for vertical placement |
+| `[window].position_x`             | X offset when `center` is false |
+| `[window].position_y`             | Y offset when `center` is false |
+| `[window].vertical_align`         | Vertical alignment when centered: `top`, `center` or `one-third` |
+| `[font].fontname`                 | Xft font description |
+| `[input].prompt`                  | Text prefix before the user query |
+| `[input].cursor`                  | Character drawn after the query text |
+| `[terminal].program`              | Terminal emulator launched for `/` commands |
+| `[border].width`                  | Thickness of the outer window border (0 disables) |
+| `[theme].last_chosen`             | Name of the last-selected theme |
 
 ---
 
