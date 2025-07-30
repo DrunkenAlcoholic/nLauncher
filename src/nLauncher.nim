@@ -328,25 +328,21 @@ proc handleKeyPress(ev: var XEvent) =
 # ── Main loop ───────────────────────────────────────────────────────────
 proc main() =
   benchMode = "--bench" in commandLineParams()
-  timeIt "Init Config:" :
-    initLauncherConfig()
-  timeIt "Load Applications:" :
-    loadApplications()
-  timeIt "Load Recent Apps:" :
-    loadRecent()
-  timeIt "Build Actions:" :
-    buildActions()
-  initGui()
 
-  # Benchmark the time it takes to redraw 1 frame
+  timeIt "Init Config:"       : initLauncherConfig()
+  timeIt "Load Applications:" : loadApplications()
+  timeIt "Load Recent Apps:"  :  loadRecent()
+  timeIt "Build Actions:"     : buildActions()
+  
+  initGui()
+  
+  timeIt "updateParsedColors:"      :  updateParsedColors(config)
+  timeIt "updateGuiColors:"         : gui.updateGuiColors()
+  timeIt "Benchmark(Redraw Frame):" : gui.redrawWindow()
+
   if benchMode:
-    timeIt "Benchmark:" :
-      gui.redrawWindow()
     quit 0
 
-  updateParsedColors(config)
-  gui.updateGuiColors()
-  gui.redrawWindow()
 
   while not shouldExit:
     var ev: XEvent
