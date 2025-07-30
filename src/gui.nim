@@ -290,8 +290,8 @@ proc redrawWindow*() =
   # Clock at bottom-right ─────────────────────────────────────────────────────
   let nowStr = now().format("HH:mm")
   let cw = textWidth(nowStr)
-  let cx = config.winWidth - int(cw) - 6
-  let cy = config.winMaxHeight - 4
+  let cx = config.winWidth - int(cw) - 2
+  let cy = config.winMaxHeight - 8
   XftDrawStringUtf8(xftDraw, cast[PXftColor](addr xftColorFg), overlayFont,
     cint(cx), cint(cy),
     cast[PFcChar8](nowStr[0].addr), nowStr.len.cint

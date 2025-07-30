@@ -118,26 +118,27 @@ const
 # ── Defaults as TOML text ────────────────────────────────────────────────
 const defaultToml* = """
 [window]
-width = 500
-max_visible_items = 10
-center = true
-position_x = 20
-position_y = 50
-vertical_align = "one-third"
+width = 500                  # Width of the launcher window
+max_visible_items = 10       # Max viewable items in the application list(dictates the height of the window)
+center = true                # Set to false to use pos+x and pos_y below, set true to use center + vertical align
+position_x = 20              # Vertical position
+position_y = 500             # Horizontal position
+vertical_align = "one-third" # Options "top" "center" "one-third"
 
 [font]
-fontname = "Noto Sans:size=12"
+fontname = "Noto Sans:size=12" # Set your font
 
 [input]
-prompt = "> "
-cursor = "_"
+prompt = "> "               # Prompt Character Left side
+cursor = "_"                # Prompt Charater under text
 
 [terminal]
-program = "kitty"
+program = "kitty"           # Set your terminal for use with "/", has fallback code if nothing is set
 
 [border]
-width = 2
+width = 2                   # Set outter window border width, set 0 to disable.
 
+# …add or remove more [[themes]] blocks as desired…
 [[themes]]
 name                   = "Default"
 bgColorHex             = "#2E3440"
