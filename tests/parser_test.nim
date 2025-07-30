@@ -1,3 +1,7 @@
+# tests/parser_test.nim
+## parser_test.nim — unit tests for parser helpers
+## MIT; see LICENSE.
+
 import unittest
 import ../src/parser
 
