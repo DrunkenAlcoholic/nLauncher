@@ -87,34 +87,34 @@ Copy & paste this skeleton or edit in place:
 # nlauncher.toml
 
 [window]
-width               = 600
-max_visible_items   = 12
-center              = true
-position_x          = 20
-position_y          = 50
-vertical_align      = "one-third"
+width               = 600  # Width in pixels
+max_visible_items   = 12   # Max list rows (controls window height)
+center              = true # If true, ignore position_x/y and use vertical_align
+position_x          = 20   # X offset when center=false
+position_y          = 50   # Y offset when center=false
+vertical_align      = "one-third" # top | center | one-third
 
 [font]
-fontname = "JetBrainsMono:size=14"
+fontname = "JetBrainsMono:size=14" # Xft font string
 
 [input]
-prompt = "> "
-cursor = "_"
+prompt = "> "   # Prefix in the input box
+cursor = "_"    # Character drawn under the typed text
 
 [terminal]
-program = "kitty"
+program = "kitty" # Spawned for slash commands; falls back to $PATH search
 
 [border]
-width = 2
+width = 2       # Outer border thickness (0 disables)
 
 # ── Available themes ───────────────────────────────────────────────────────
 [[themes]]
-name                   = "Nord"
-bgColorHex             = "#2E3440"
-fgColorHex             = "#D8DEE9"
-highlightBgColorHex    = "#88C0D0"
-highlightFgColorHex    = "#2E3440"
-borderColorHex         = "#4C566A"
+name                   = "Nord"      # Theme identifier
+bgColorHex             = "#2E3440"   # Background colour
+fgColorHex             = "#D8DEE9"   # Foreground text colour
+highlightBgColorHex    = "#88C0D0"   # Background of the selection row
+highlightFgColorHex    = "#2E3440"   # Text colour when an item is selected
+borderColorHex         = "#4C566A"   # Window border colour
 
 [[themes]]
 name                   = "Dracula"
@@ -128,7 +128,7 @@ borderColorHex         = "#44475A"
 
 # ── Persist last theme ─────────────────────────────────────────────────────
 [theme]
-last_chosen = "Nord"
+last_chosen = "Nord"  # Name of the theme restored on startup
 ```
 
 ---
