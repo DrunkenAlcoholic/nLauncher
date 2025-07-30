@@ -7,9 +7,10 @@
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, osproc, strutils, options, tables, sequtils,
              json, times, editdistance, uri, sets, algorithm]
-import parsecfg except Config
+#import parsecfg except Config
+import parsetoml as toml
 import x11/[xlib, x, xutil, keysym]
-import ./[state, parser, gui, themes, utils]
+import ./[state, parser, gui, utils]
 
 # ── Module‑local globals ────────────────────────────────────────────────
 var
@@ -50,8 +51,8 @@ proc scanConfigFiles*(query: string): seq[DesktopApp] =
       )
 
 # ── Theme helpers ───────────────────────────────────────────────────────
-proc applyTheme(cfg: var Config; name: string) =
-  ## Apply built‑in theme by name.
+proc applyTheme*(cfg: var Config; name: string) =
+  ## Copy colours from named theme into *cfg* and record the name.
   for i, th in themeList:
     if th.name.toLower == name.toLower:
       cfg.bgColorHex          = th.bgColorHex
@@ -59,6 +60,7 @@ proc applyTheme(cfg: var Config; name: string) =
       cfg.highlightBgColorHex = th.highlightBgColorHex
       cfg.highlightFgColorHex = th.highlightFgColorHex
       cfg.borderColorHex      = th.borderColorHex
+      cfg.themeName           = th.name            # ← record the chosen theme
       currentThemeIndex       = i
       return
 
@@ -70,8 +72,23 @@ proc updateParsedColors(cfg: var Config) =
   cfg.highlightFgColor = parseColor(cfg.highlightFgColorHex)
   cfg.borderColor      = parseColor(cfg.borderColorHex)
 
-proc cycleTheme(cfg: var Config) =
-  ## Cycle built‑in theme and redraw.
+proc saveLastTheme(cfgPath: string) =
+  var lines = readFile(cfgPath).splitLines()
+  var inTheme = false
+  for i in 0..<lines.len:
+    let l = lines[i].strip()
+    if l == "[theme]":
+      inTheme = true; continue
+    if inTheme:
+      if l.startsWith("[") and l.endsWith("]"):
+        break
+      if l.startsWith("last_chosen"):
+        lines[i] = "last_chosen = \"" & config.themeName & "\""
+        break
+  writeFile(cfgPath, join(lines, "\n"))
+
+
+proc cycleTheme*(cfg: var Config) =
   currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
   let th = themeList[currentThemeIndex]
   applyTheme(cfg, th.name)
@@ -79,6 +96,9 @@ proc cycleTheme(cfg: var Config) =
   updateParsedColors(cfg)
   gui.updateGuiColors()
   gui.redrawWindow()
+
+  # now config.themeName is set correctly:
+  saveLastTheme(getHomeDir() / ".config" / "nLauncher" / "nlauncher.toml")
 
 # ── Applications discovery ──────────────────────────────────────────────
 proc loadApplications() =
@@ -126,89 +146,82 @@ proc loadApplications() =
       echo "Warning: cache not saved."
 
 
+# ── Load & apply config from TOML ───────────────────────────────────────────
 proc initLauncherConfig() =
-  ## Defaults → override via config.ini
-  config = Config()
-  config.winWidth            = 500
-  config.lineHeight          = 22
-  config.maxVisibleItems     = 10
-  config.centerWindow        = true
-  config.positionX           = 20
-  config.positionY           = 50
-  config.verticalAlign       = "one-third"
-  config.fontName            = "Noto Sans:size=12"
-  config.prompt              = "> "
-  config.cursor              = "_"
-  config.terminalExe         = "gnome-terminal"
-  config.bgColorHex          = "#2E3440"
-  config.fgColorHex          = "#D8DEE9"
-  config.highlightBgColorHex = "#88C0D0"
-  config.highlightFgColorHex = "#2E3440"
-  config.borderColorHex      = "#8BE9FD"
-  config.borderWidth         = 2
-  config.themeName           = ""
+  ## Initialize defaults, then override via TOML.
+  config = Config()  # zero‑init
 
-  let cfgPath = getHomeDir() / ".config" / "nLauncher" / "config.ini"
+  # In‑code defaults (fallbacks)
+  config.winWidth        = 500
+  config.lineHeight      = 22
+  config.maxVisibleItems = 10
+  config.centerWindow    = true
+  config.positionX       = 20
+  config.positionY       = 50
+  config.verticalAlign   = "one-third"
+  config.fontName        = "Noto Sans:size=12"
+  config.prompt          = "> "
+  config.cursor          = "_"
+  config.terminalExe     = "gnome-terminal"
+  config.borderWidth     = 2
+
+  # Ensure TOML config exists
+  let cfgDir  = getHomeDir() / ".config" / "nLauncher"
+  let cfgPath = cfgDir / "nlauncher.toml"
   if not fileExists(cfgPath):
-    createDir(cfgPath.parentDir)
-    writeFile(cfgPath, iniTemplate)
+    createDir(cfgDir)
+    writeFile(cfgPath, defaultToml)
     echo "Created default config at ", cfgPath
 
-  # DEBUGGING: print out what config file we’re loading
-  #let cfgPath = getHomeDir() / ".config" / "nLauncher" / "config.ini"
-  #echo "DEBUG ▶ initLauncherConfig: cfgPath = ", cfgPath
-  #echo "DEBUG ▶ fileExists(cfgPath) = ", fileExists(cfgPath)
-  #if fileExists(cfgPath):
-  #  let raw = readFile(cfgPath)
-  #  echo "DEBUG ▶ raw config contents:\n", raw
-  #else:
-  #  echo "DEBUG ▶ config file not found, will create defaults"
+  # Parse the TOML
+  let tbl = toml.parseFile(cfgPath)
 
+  # ── window section ─────────────────────────────────────────────────────
+  let w = tbl["window"]
+  config.winWidth        = w["width"].getInt(config.winWidth)
+  config.maxVisibleItems = w["max_visible_items"].getInt(config.maxVisibleItems)
+  config.centerWindow    = w["center"].getBool(config.centerWindow)
+  config.positionX       = w["position_x"].getInt(config.positionX)
+  config.positionY       = w["position_y"].getInt(config.positionY)
+  config.verticalAlign   = w["vertical_align"].getStr(config.verticalAlign)
 
-  let ini = loadConfig(cfgPath)
-  # Debug: show parsed INI entries
-  for sec0, tbl in ini:
-    let sec = sec0.toLowerAscii.strip()
-    for key0, val in tbl:
-      let key = key0.toLowerAscii.strip()
-      #echo "DEBUG ▶ parsed ini section=\"", sec, "\" key=\"", key, "\" val=\"", val, "\""
-      case sec
-      of "window":
-        case key
-        of "width":             config.winWidth        = val.parseInt
-        of "max_visible_items": config.maxVisibleItems = val.parseInt
-        of "center":            config.centerWindow    = val.toLower == "true"
-        of "position_x":        config.positionX       = val.parseInt
-        of "position_y":        config.positionY       = val.parseInt
-        of "vertical_align":    config.verticalAlign   = val
-        else: discard
-      of "font":
-        if key == "fontname": config.fontName = val
-      of "input":
-        case key
-        of "prompt": config.prompt = val
-        of "cursor": config.cursor = val
-        else: discard
-      of "terminal":
-        if key == "program":
-          #echo "DEBUG ▶ reading terminal from config: ", cfgPath
-          config.terminalExe = val.strip(chars={'"','\''})
-          #echo "DEBUG ▶ config.terminalExe = '", config.terminalExe, "'"
-      of "border":
-        if key == "width": config.borderWidth = val.parseInt
-      of "colors":
-        case key
-        of "background":           config.bgColorHex          = val
-        of "foreground":           config.fgColorHex          = val
-        of "highlight_background": config.highlightBgColorHex = val
-        of "highlight_foreground": config.highlightFgColorHex = val
-        of "border_color":         config.borderColorHex      = val
-        else: discard
-      of "theme":
-        if key == "name": config.themeName = val
-      else: discard
+  # ── font section ───────────────────────────────────────────────────────
+  let f = tbl["font"]
+  config.fontName = f["fontname"].getStr(config.fontName)
 
-  if config.themeName.len > 0: applyTheme(config, config.themeName)
+  # ── input section ──────────────────────────────────────────────────────
+  let inp = tbl["input"]
+  config.prompt = inp["prompt"].getStr(config.prompt)
+  config.cursor = inp["cursor"].getStr(config.cursor)
+
+  # ── terminal section ───────────────────────────────────────────────────
+  let term = tbl["terminal"]
+  config.terminalExe = term["program"].getStr(config.terminalExe)
+
+  # ── border section ─────────────────────────────────────────────────────
+  let b = tbl["border"]
+  config.borderWidth = b["width"].getInt(config.borderWidth)
+
+  # ── themes array ───────────────────────────────────────────────────────
+  themeList = @[]
+  for thVal in tbl["themes"].getElems():
+    let th = thVal.getTable()
+    themeList.add Theme(
+      name:                th["name"].getStr(""),
+      bgColorHex:          th["bgColorHex"].getStr(""),
+      fgColorHex:          th["fgColorHex"].getStr(""),
+      highlightBgColorHex: th["highlightBgColorHex"].getStr(""),
+      highlightFgColorHex: th["highlightFgColorHex"].getStr(""),
+      borderColorHex:      th["borderColorHex"].getStr("")
+    )
+
+  # ── last_chosen ────────────────────────────────────────────────────────
+  let last = tbl["theme"]["last_chosen"].getStr(config.themeName)
+  if last.len > 0:
+    config.themeName = last
+    applyTheme(config, last)
+
+  # Recompute derived state
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
 
 # ── Fuzzy match helper ─────────────────────────────────────────────────

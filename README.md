@@ -1,163 +1,158 @@
-# Nim Launcher
+# nLauncher
 
-> A lightning‑fast, X11‑native application + command launcher written in pure Nim.
-> Inspired by Rofi and Tofi, designed for minimal latency, easy theming, and zero toolkit bloat.
+> A lightning‑fast, X11‑native application and command launcher written in Nim.  
+> Minimal dependencies, zero toolkit bloat, instant fuzzy search, and rich theming.
 
-![Nim Launcher screenshot](Screenshot.gif)
+![nLauncher screenshot](Screenshot.gif)
 
 ---
 
 ## Highlights
 
-| Feature                            | Notes                                                                                    |
-| ---------------------------------- | ---------------------------------------------------------------------------------------- |
-| **Typo‑tolerant fuzzy search**     | `firefx` → Firefox                                                                       |
-|  **Sub‑1 ms startup (bench mode)** | `--bench` flag for raw launch timing                                                     |
-| **Recent‑apps history**            | Empty query shows your last launches first                                               |
-| **100 % keyboard‑driven**          | Arrow keys / Enter / Esc                                                                 |
-| **Live theme cycling**             | Press <kbd>F5</kbd> to rotate through built‑ins                                          |
-| **Fully themable**                 | 25+ colour schemes shipped; define your own                                              |
-| **Any Xft font**                   | `fontname = JetBrainsMono:size=14`                                                       |
-| **Slash triggers**                 | `/ …` run command • `/c cfg` open dotfile • `/y video` or `/g query` open browser search |
-| **Zero toolkit**                   | Pure Xlib + Xft ⇒ tiny binary                                                            |
+| Feature                            | Notes                                                                                          |
+| ---------------------------------- | ---------------------------------------------------------------------------------------------- |
+| **Typo‑tolerant fuzzy search**     | `firefx` → “Firefox”                                                                           |
+| **Live clock**                     | Small HH:mm clock in the bottom‑right                                                         |
+| **Sub‑1 ms startup (bench mode)**  | `--bench` flag for raw launch timing                                                          |
+| **Recent‑apps history**            | Empty query shows your last launches first                                                    |
+| **100 % keyboard‑driven**          | Arrow keys / Enter / Esc                                                                      |
+| **Live theme cycling & persistence** | Press F5 to cycle themes; saves your last choice in the TOML config                           |
+| **Fully themable via TOML**        | 25+ colour schemes built‑in; add your own under [[themes]] in `nlauncher.toml`                 |
+| **Slash triggers**                 | `/ …` run shell command • `/c …` open dotfile • `/y …` YouTube • `/g …` Google • `/w …` Wiki     |
+| **Zero toolkit**                   | Pure Xlib + Xft + [parsetoml](https://github.com/pragmagic/parsetoml)                          |
 
 ---
 
 ## Building & Running
 
-> **Skip this if you just use the pre‑built binary** in the repo release page.
+> **Skip this if you use the pre‑built binary** from the latest release.
 
 ### Dependencies
 
-| Package      | Arch / Manjaro                 | Debian / Ubuntu                          |
-| ------------ | ------------------------------ | ---------------------------------------- |
-| Nim compiler | `sudo pacman -S nim`           | `sudo apt install nim`                   |
-| X11 headers  | `sudo pacman -S libx11 libxft` | `sudo apt install libx11-dev libxft-dev` |
+- **Nim**: install via the recommended [choosenim](https://nim-lang.org/choosenim) script:  
+  ```bash
+  curl https://nim-lang.org/choosenim/init.sh -sSf | sh
+  ```
+- **X11 headers** & **Xft**:  
+  - Arch/Manjaro: `sudo pacman -S libx11 libxft`  
+  - Debian/Ubuntu: `sudo apt install libx11-dev libxft-dev`
+- **Nimble packages**:  
+  ```bash
+  nimble install parsetoml x11
+  ```
 
 ### Build
 
 ```bash
 git clone https://github.com/DrunkenAlcoholic/nLauncher.git
 cd nLauncher
-nimble install x11            # one‑time; pulls Nim X11 bindings
-nimble build -d:release       # creates ./nLauncher
+nimble build -d:release   # produces ./nLauncher
 ```
 
-### Bind to a hotkey
+### Command‑line flags
 
-Example (i3 WM):
-
-```ini
-bindsym $mod+d exec --no-startup-id nLauncher
-```
+- `--bench` → prints millisecond‑precision startup timings and exits  
 
 ---
 
 ## Usage Cheat‑sheet
 
-| Keys / Action       | Result                                           |
-| ------------------- | ------------------------------------------------ |
-| _Type letters_      | Instant fuzzy filter (typo tolerant)             |
-| `/cmd …`            | Run shell command inside your terminal           |
-| `/c …`              | Search `~/.config` for dotfiles → open in editor |
-| `/y …`              | YouTube search in browser                        |
-| `/g …`              | Google search in browser                         |
-| **Enter**           | Launch item / run command                        |
-| **Esc** / focus‑out | Quit                                             |
-| **↑ / ↓**           | Navigate list                                    |
-| **F5**              | Cycle built‑in themes                            |
-| _(empty query)_     | Shows recent applications first                  |
-
-Bench start‐time:
-
-```bash
-nLauncher --bench      # prints time & exits, also used to close window for hyperfine
-```
+| Keys / Pattern      | Action                                                                   |
+| ------------------- | ------------------------------------------------------------------------ |
+| _Type letters_      | Instant fuzzy filter (typo‑tolerant)                                     |
+| `/ …`               | Run shell command (everything after the slash is passed to your shell)  |
+| `/c …`              | Search `~/.config` for dotfiles and open in your editor                  |
+| `/y …`              | Search YouTube in browser                                                |
+| `/g …`              | Google search in browser                                                 |
+| `/w …`              | Wikipedia search in browser                                              |
+| **Enter**           | Launch item / run command                                                |
+| **Esc**             | Quit                                                                     |
+| **↑ / ↓**           | Navigate list                                                            |
+| **F5**              | Cycle built‑in themes                                                    |
+| _(empty query)_     | Shows recent applications first                                          |
 
 ---
 
-## Configuration (`~/.config/nLauncher/config.ini`)
+## Configuration
 
-<details>
-<summary>Click to expand</summary>
+The first time you run `nLauncher`, it creates:
 
-### `[window]`
-
-| Key                 | Default     | Meaning                          |
-| ------------------- | ----------- | -------------------------------- |
-| `width`             | `600`       | Window width (px)                |
-| `max_visible_items` | `15`        | Rows shown before scrolling      |
-| `center`            | `true`      | Center horizontally              |
-| `vertical_align`    | `one-third` | `top` \| `center` \| `one-third` |
-| `position_x / y`    | `500 / 50`  | Used when `center = false`       |
-
-### `[font]`
-
-| Key        | Example                 |
-| ---------- | ----------------------- |
-| `fontname` | `JetBrainsMono:size=14` |
-
-### `[input]`
-
-| Prompt | Cursor |
-| ------ | ------ |
-| `> `   | `_`    |
-
-### `[border]`
-
-| Key     | Default |
-| ------- | ------- |
-| `width` | `2`     |
-
-### `[colors]`
-
-Same keys as other launchers (`background`, `foreground`, `highlight_background`, `highlight_foreground`, `border_color`). Hex `#RRGGBB`.
-
-### `[theme]`
-
-```ini
-[theme]
-name = Nord
+```
+~/.config/nLauncher/nlauncher.toml
 ```
 
-Leave blank to honour `[colors]`.
+Copy & paste this skeleton or edit in place:
 
-### `[terminal]`
+```toml
+# nlauncher.toml
 
-```ini
+[window]
+width               = 600
+max_visible_items   = 12
+center              = true
+position_x          = 20
+position_y          = 50
+vertical_align      = "one-third"
+
+[font]
+fontname = "JetBrainsMono:size=14"
+
+[input]
+prompt = "> "
+cursor = "_"
+
 [terminal]
-program = alacritty
+program = "kitty"
+
+[border]
+width = 2
+
+# ── Available themes ───────────────────────────────────────────────────────
+[[themes]]
+name                   = "Nord"
+bgColorHex             = "#2E3440"
+fgColorHex             = "#D8DEE9"
+highlightBgColorHex    = "#88C0D0"
+highlightFgColorHex    = "#2E3440"
+borderColorHex         = "#4C566A"
+
+[[themes]]
+name                   = "Dracula"
+bgColorHex             = "#282A36"
+fgColorHex             = "#F8F8F2"
+highlightBgColorHex    = "#BD93F9"
+highlightFgColorHex    = "#282A36"
+borderColorHex         = "#44475A"
+
+# …add or remove more [[themes]] blocks as desired…
+
+# ── Persist last theme ─────────────────────────────────────────────────────
+[theme]
+last_chosen = "Nord"
 ```
-
-If left blank, the launcher checks `$TERMINAL` first then falls back to
-`kitty`, `alacritty`, `wezterm`, `foot`, `gnome-terminal`, `konsole`,
-`xfce4-terminal` and finally `xterm`.
-
-</details>
 
 ---
 
 ## Built‑in Themes
 
-Nord • Dracula • Solarized (Light + Dark) • Gruvbox (Light + Dark) • Catppuccin (4 flavours) • Material (Light + Dark) • One (Light + Dark) • Monokai (+ Pro) • GitHub (Light + Dark) • Ayu (Light + Dark) • Synthwave 84 • Palenight • Cobalt • Tokyo Night (Light + Dark)
+A quick reference to the shipped themes (in the order they appear in TOML):
 
-Cycle live with <kbd>F5</kbd>.
-
----
-
-## Planned
-
-- Pixel‑level character highlighting in matches
-- Optional application icons (SVG/PNG lookup with caching)
-- Config‑selectable history length
-- Wayland port (via `wlroots` or `wlr-layer-shell`) 🤔
+Nord • Dracula • Solarized Light • Solarized Dark • Gruvbox Light • Gruvbox Dark  
+Catppuccin Frappe, Latte, Macchiato, Mocha • Ayu Light, Dark • Material Light, Dark  
+One Light, Dark • Monokai • Monokai Pro • GitHub Light • GitHub Dark  
+Cobalt • Palenight • Synthwave 84 • Tokyo Night Light • Tokyo Night • …and more
 
 ---
 
-## Credits
+## Future
 
-_Written & maintained by @DrunkenAlcoholic._
-ChatGPT assisted in refactors, edge‑case handling, and this README.
+- **Icons & comments**: display app icons and `.comment` text alongside names.  
+- **Wayland support**: investigate native layer‑shell integration (beyond X11).  
+- **Plugin hooks**: let external scripts inject custom actions.  
 
-Licensed under **MIT**.
-Enjoy launching at ludicrous speed 🚀
+---
+
+## License
+
+© 2025 DrunkenAlcoholic — MIT License  
+Enjoy launching at ludicrous speed! 🚀
