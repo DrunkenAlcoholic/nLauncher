@@ -366,6 +366,10 @@ proc main() =
       if not shouldExit:
         gui.redrawWindow()
 
+    of ButtonPress:
+      # any click (inside or outside) closes launcher
+      shouldExit = true
+
     of FocusOut:
       if seenMapNotify:
         # discard this one, reset flag

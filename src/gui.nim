@@ -204,10 +204,21 @@ proc initGui*() =
     discard XSelectInput(
       display, window,
       ExposureMask or KeyPressMask or KeyReleaseMask or
-      FocusChangeMask or StructureNotifyMask
+      FocusChangeMask or StructureNotifyMask or ButtonPressMask
     )
     discard XMapWindow(display, window)
     discard XFlush(display)
+
+    # Grab pointer so clicks anywhere send ButtonPress to us
+    discard XGrabPointer(
+      display,
+      window,
+      1,                        # ownerEvents?
+      ButtonPressMask,             # event mask
+      GrabModeAsync, GrabModeAsync,
+      0, 0,                  # confine_to, cursor
+      CurrentTime
+    )
 
     # ── Focus handling ─────────────────────────────────────────────────────
     if not isWayland:
@@ -275,6 +286,16 @@ proc redrawWindow*() =
 
   # Theme overlay ────────────────────────────────────────────────────────────
   drawThemeOverlay()
+
+  # Clock at bottom-right ─────────────────────────────────────────────────────
+  let nowStr = now().format("HH:mm")
+  let cw = textWidth(nowStr)
+  let cx = config.winWidth - int(cw) - 6
+  let cy = config.winMaxHeight - 4
+  XftDrawStringUtf8(xftDraw, cast[PXftColor](addr xftColorFg), overlayFont,
+    cint(cx), cint(cy),
+    cast[PFcChar8](nowStr[0].addr), nowStr.len.cint
+  )
 
   # Border (draw last so nothing over‑paints it) ─────────────────────────────
   if config.borderWidth > 0:
