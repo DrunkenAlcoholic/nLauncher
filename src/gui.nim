@@ -1,7 +1,6 @@
 # src/gui.nim
-#──────────────────────────────────────────────────────────────────────────────
-#  gui.nim — X11 / Xft drawing and window management
-#  MIT; see LICENSE for details.
+## gui.nim — X11 / Xft drawing and window management
+## MIT; see LICENSE for details.
 
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[strutils, times, os]
@@ -117,7 +116,7 @@ proc initGui*() =
   display = XOpenDisplay(nil)
   if display.isNil: quit "Cannot open X display"
   screen = XDefaultScreen(display)
-  
+
   # Fonts ----------------------------------------------------------------
   font         = loadFont(display, screen, config.fontName)
   overlayFont  = loadFont(display, screen, deriveSmallerFont(config.fontName))
@@ -145,20 +144,20 @@ proc initGui*() =
     else:
       winX = cint(config.positionX)
       winY = cint(config.positionY)
-  
+
     # ── Set up window attributes ──────────────────────────────────────────
     var attrs: XSetWindowAttributes
     let isWayland = getEnv("WAYLAND_DISPLAY") != ""
     attrs.override_redirect = if isWayland: 0 else: 1
     attrs.background_pixel  = config.bgColor
     attrs.border_pixel      = config.borderColor
-  
+
     # Build the valuemask (must be culong)
     let valueMask = culong(
       CWBackPixel or CWBorderPixel or
       (if not isWayland: CWOverrideRedirect else: 0)
     )
-  
+
     # ── Create the window ─────────────────────────────────────────────────
     window = XCreateWindow(
       display,
@@ -173,7 +172,7 @@ proc initGui*() =
       valueMask,
       cast[PXSetWindowAttributes](addr attrs)
     )
-  
+
     # ── Under Wayland/Xwayland: mark floating + remove decorations ────────
     if isWayland:
       # 1) _NET_WM_WINDOW_TYPE_DIALOG → floating
@@ -186,7 +185,7 @@ proc initGui*() =
         32.cint, PropModeReplace,
         cast[Pcuchar](addr dialogAtom), 1.cint
       )
-  
+
       # 2) Motif hints → strip all decorations
       const MWM_HINTS_DECORATIONS = 2'u32
       let mwmHintsAtom = XInternAtom(display, "_MOTIF_WM_HINTS", 0)
@@ -199,7 +198,7 @@ proc initGui*() =
         32.cint, PropModeReplace,
         cast[Pcuchar](addr mwmHints), mwmHints.len.cint
       )
-  
+
     # ── Common setup ────────────────────────────────────────────────────────
     discard XStoreName(display, window, "nLauncher")
     discard XSelectInput(
@@ -209,11 +208,11 @@ proc initGui*() =
     )
     discard XMapWindow(display, window)
     discard XFlush(display)
-  
+
     # ── Focus handling ─────────────────────────────────────────────────────
     if not isWayland:
       discard XSetInputFocus(display, window, RevertToParent, CurrentTime)
-  
+
     # ── Create graphics contexts ──────────────────────────────────────────
     gc      = XCreateGC(display, window, 0, nil)
     xftDraw = XftDrawCreate(

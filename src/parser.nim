@@ -1,6 +1,6 @@
 # src/parser.nim
 ## parser.nim — helpers for reading `.desktop` files
-## MIT; see LICENSE.
+## MIT; see LICENSE for details.
 ##
 ## Public interface:
 ##   • getBaseExec(str): string

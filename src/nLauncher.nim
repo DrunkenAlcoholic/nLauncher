@@ -1,5 +1,7 @@
+# src/nLauncher.nim
 ## nLauncher.nim — main program with Action abstraction and fixes
-## MIT Licence. Requires Nim ≥ 2.0, x11 & xft Nimble packages.
+## MIT; see LICENSE for details.
+## Requires Nim ≥ 2.0 with x11 & xft packages.
 ## Startup in --bench mode still completes in ~1–2 ms on a modern system.
 
 # ── Imports ─────────────────────────────────────────────────────────────
@@ -350,20 +352,20 @@ proc main() =
     var ev: XEvent
     discard XNextEvent(display, ev.addr)
     case ev.theType
-  
+
     of MapNotify:
       # window was just mapped; next FocusOut is spurious → swallow it
       if ev.xmap.window == window:
         seenMapNotify = true
-  
+
     of Expose:
       gui.redrawWindow()
-  
+
     of KeyPress:
       handleKeyPress(ev)
       if not shouldExit:
         gui.redrawWindow()
-  
+
     of FocusOut:
       if seenMapNotify:
         # discard this one, reset flag
@@ -371,10 +373,10 @@ proc main() =
       else:
         # real blur → exit
         shouldExit = true
-  
+
     else:
       discard
-  
+
   discard XDestroyWindow(display, window)
   discard XCloseDisplay(display)
 
