@@ -1,6 +1,6 @@
 # src/state.nim
 ## state.nim — centralised data definitions & global state
-## MIT; see LICENSE.
+## MIT; see LICENSE for details.
 ##
 ## This module is intentionally logic‑free.  It defines:
 ## • App/cache/config structures
@@ -134,7 +134,7 @@ highlight_foreground="#2E3440"
 border_color="#8BE9FD"
 
 [theme]
-# Leaving this empty will use the colour scheme in the [colors] section. 
+# Leaving this empty will use the colour scheme in the [colors] section.
 # or choose one of the inbuilt themes below to override by un-commenting.
 #name = "Ayu Dark"
 #name = "Ayu Light"

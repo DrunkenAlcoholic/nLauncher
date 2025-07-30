@@ -1,6 +1,6 @@
 # src/themes.nim
 ## themes.nim — catalogue of built‑in colour schemes
-## MIT; see LICENSE.
+## MIT; see LICENSE for details.
 ##
 ## This module is data‑only: it exposes a list of `Theme` records and a tiny
 ## lookup helper.  No side effects.
