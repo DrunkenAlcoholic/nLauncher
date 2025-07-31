@@ -214,11 +214,32 @@ proc initLauncherConfig() =
     )
 
   # ── last_chosen ────────────────────────────────────────────────────────
-  let last = tbl["theme"]["last_chosen"].getStr(config.themeName)
-  if last.len > 0:
-    config.themeName = last
-    applyTheme(config, last)
-
+  let lastName = tbl["theme"]["last_chosen"].getStr("")
+  var pickedIndex = -1
+  
+  # Try to find the saved theme in the list
+  if lastName.len > 0:
+    for i, th in themeList:
+      if th.name == lastName:
+        pickedIndex = i
+        break
+  
+  # Fallback to the first theme if not found
+  if pickedIndex < 0:
+    if themeList.len > 0:
+      pickedIndex = 0
+    else:
+      quit("nLauncher error: no themes defined in nlauncher.toml")
+  
+  # Apply the chosen theme
+  let chosen = themeList[pickedIndex].name
+  config.themeName = chosen
+  applyTheme(config, chosen)
+  
+  # If we fell back, persist the new choice
+  if chosen != lastName:
+    saveLastTheme(cfgPath)
+  
   # Recompute derived state
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
 

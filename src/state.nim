@@ -194,6 +194,14 @@ highlightFgColorHex    = "#002240"
 borderColorHex         = "#003366"
 
 [[themes]]
+name                   = "Charcoal"
+bgColorHex             = "#120F09"
+fgColorHex             = "#C0A179"
+highlightBgColorHex    = "#35291D"
+highlightFgColorHex    = "#D6B891"
+borderColorHex         = "#887254"
+
+[[themes]]
 name                   = "Dracula"
 bgColorHex             = "#282A36"
 fgColorHex             = "#F8F8F2"
@@ -234,12 +242,12 @@ highlightFgColorHex    = "#FBF1C7"
 borderColorHex         = "#EBDBB2"
 
 [[themes]]
-name                = "Legacy"
-bgColorHex          = "#14191f"
-fgColorHex          = "#aec2e0"
-highlightBgColorHex = "#1b232c"
-highlightFgColorHex = "#aec2e0"
-borderColorHex      = "#324357"
+name                   = "Legacy"
+bgColorHex             = "#14191f"
+fgColorHex             = "#aec2e0"
+highlightBgColorHex    = "#1b232c"
+highlightFgColorHex    = "#aec2e0"
+borderColorHex         = "#324357"
 
 [[themes]]
 name                   = "Material Dark"
@@ -258,12 +266,12 @@ highlightFgColorHex    = "#FAFAFA"
 borderColorHex         = "#BDBDBD"
 
 [[themes]]
-name                = "Mellow Contrast"
-bgColorHex          = "#0b0a09"
-fgColorHex          = "#f8f8f2"
-highlightBgColorHex = "#13110f"
-highlightFgColorHex = "#f8f8f2"
-borderColorHex      = "#7a7267"
+name                   = "Mellow Contrast"
+bgColorHex             = "#0b0a09"
+fgColorHex             = "#f8f8f2"
+highlightBgColorHex    = "#13110f"
+highlightFgColorHex    = "#f8f8f2"
+borderColorHex         = "#7a7267"
 
 [[themes]]
 name                   = "Monokai"
