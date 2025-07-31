@@ -194,12 +194,20 @@ highlightFgColorHex    = "#002240"
 borderColorHex         = "#003366"
 
 [[themes]]
-name                   = "Charcoal"
+name                   = "Charcoal Dark" #https://github.com/mubin6th/charcoal
 bgColorHex             = "#120F09"
 fgColorHex             = "#C0A179"
 highlightBgColorHex    = "#35291D"
 highlightFgColorHex    = "#D6B891"
 borderColorHex         = "#887254"
+
+[[themes]]
+name                   = "Charcoal Light" #https://github.com/mubin6th/charcoal
+bgColorHex             = "#d6b891"
+fgColorHex             = "#35291d"
+highlightBgColorHex    = "#a28662"
+highlightFgColorHex    = "#120f09"
+borderColorHex         = "#66553f"
 
 [[themes]]
 name                   = "Dracula"
