@@ -12,10 +12,10 @@ requires "x11"
 
 # Build tasks
 task release, "Build the application with release flags":
-  exec "nim c -d:release -d:danger --opt:size -o:./bin/nlauncher src/nlauncher.nim"
+  exec "nim c -d:release -d:danger --passC:'-march=x86-64' --passC:'-mtune=generic' --passL:'-s' --opt:size -o:./bin/nlauncher src/nlauncher.nim"
   
 
-task fast, "Build with speed optimizations (safer than danger)":
+task fast, "Build with speed optimizations (safer than danger), Using CachyOS v4 gcc":
   mkDir("bin")
   exec "nim c -d:release --opt:speed -o:./bin/nlauncher src/nlauncher.nim"
 
