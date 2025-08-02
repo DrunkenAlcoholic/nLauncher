@@ -12,7 +12,6 @@ requires "x11"
 
 # Build tasks
 task release, "Build the application with release flags":
-  #mkDir("bin")
   exec "nim c -d:release -d:danger --opt:size -o:./bin/nlauncher src/nlauncher.nim"
   
 

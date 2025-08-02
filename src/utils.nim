@@ -107,7 +107,7 @@ proc allocXftColor*(hex: string, dest: var XftColor) =
     quit "XftColorAllocValue failed for " & hex
 
 # ── Recent‑apps persistence ─────────────────────────────────────────────
-let recentFile* = getHomeDir() / ".cache" / "nLauncher" / "recent.json"
+let recentFile* = getHomeDir() / ".cache" / "nlauncher" / "recent.json"
 
 proc loadRecent*() =
   ## Populate `state.recentApps` from disk; silent on error.

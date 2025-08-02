@@ -96,13 +96,13 @@ proc cycleTheme*(cfg: var Config) =
   gui.redrawWindow()
 
   # now config.themeName is set correctly:
-  saveLastTheme(getHomeDir() / ".config" / "nLauncher" / "nlauncher.toml")
+  saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
 
 # ── Applications discovery ──────────────────────────────────────────────
 proc loadApplications() =
   let usrDir   = "/usr/share/applications"
   let locDir   = getHomeDir() / ".local/share/applications"
-  let cacheDir  = getHomeDir() / ".cache" / "nLauncher"
+  let cacheDir  = getHomeDir() / ".cache" / "nlauncher"
   let cacheFile = cacheDir / "apps.json"
 
   let usrM = if dirExists(usrDir): getLastModificationTime(usrDir).toUnix else: 0'i64
@@ -164,7 +164,7 @@ proc initLauncherConfig() =
   config.borderWidth     = 2
 
   # Ensure TOML config exists
-  let cfgDir  = getHomeDir() / ".config" / "nLauncher"
+  let cfgDir  = getHomeDir() / ".config" / "nlauncher"
   let cfgPath = cfgDir / "nlauncher.toml"
   if not fileExists(cfgPath):
     createDir(cfgDir)
