@@ -46,7 +46,7 @@
 ```bash
 git clone https://github.com/DrunkenAlcoholic/nLauncher.git
 cd nLauncher
-nimble build -d:release   # produces ./nLauncher
+nimble release   # produces ./bin/nlauncher
 ```
 
 ### Command‑line flags
@@ -75,7 +75,7 @@ nimble build -d:release   # produces ./nLauncher
 
 ## Configuration
 
-The first time you run `nLauncher`, it creates:
+The first time you run `nlauncher`, it creates:
 
 ```
 ~/.config/nLauncher/nlauncher.toml
