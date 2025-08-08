@@ -73,34 +73,20 @@ proc pickAccentColor*(bgHex, fgHex, hBgHex, hFgHex: string): string =
 
 ## Parse "#RRGGBB" into 16-bit RGB components. Returns false on bad input.
 proc parseHexRgb(hex: string; r, g, b: var uint16): bool =
-  if hex.len != 7 or hex[0] != '#': return false
-  try:
-    let r8 = parseHexInt(hex[1..2])
-    let g8 = parseHexInt(hex[3..4])
-    let b8 = parseHexInt(hex[5..6])
-    r = uint16(r8 * 257)
-    g = uint16(g8 * 257)
-    b = uint16(b8 * 257)
-    true
-  except:
-    false
+  var r8, g8, b8: int
+  if not hexToRgb8(hex, r8, g8, b8): return false
+  r = uint16(r8 * 257)
+  g = uint16(g8 * 257)
+  b = uint16(b8 * 257)
+  true
 
 # ── Executable discovery ────────────────────────────────────────────────
 ## Returns true if an executable *name* can be found in $PATH (or a path).
 proc whichExists*(name: string): bool =
-  # If it's an explicit path, just check presence.
-  if name.contains('/') and fileExists(name):
-    return true
-  # Use stdlib PATH resolver first (handles executability & PATH semantics).
-  let hit = findExe(name)
-  if hit.len > 0:
-    return true
-  # Defensive fallback (odd PATH envs).
-  for dir in getEnv("PATH").split(':'):
-    if dir.len == 0: continue
-    if fileExists(dir / name):
-      return true
-  false
+  if name.len == 0: return false
+  if name.contains('/'): return fileExists(name)
+  result = findExe(name).len > 0
+
 
 ## Pick a terminal emulator: prefer `config.terminalExe`, then `$TERMINAL`,
 ## otherwise iterate over `fallbackTerms` from `state.nim`.

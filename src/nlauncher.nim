@@ -17,77 +17,72 @@ var
   actions*: seq[Action]           ## Current selectable actions
 
 # ── Utility procs ──────────────────────────────────────────────────────
-proc splitArgs(s: string): seq[string] =
-  var cur = newStringOfCap(16); var q = '\0'
-  for c in s:
-    if q == '\0':
-      case c
-      of ' ', '\t':
-        if cur.len > 0: result.add cur; cur.setLen(0)
-      of '"', '\'': q = c
-      else: cur.add c
-    else:
-      if c == q: q = '\0' else: cur.add c
-  if cur.len > 0: result.add cur
-
-proc hasHoldFlag(args: seq[string]): bool =
+# Detect common "keep window open" flags users might pass to their terminal.
+proc hasHoldFlagLocal(args: seq[string]): bool =
   for a in args:
-    if a == "--hold" or a == "--keep-open":
+    case a
+    of "--hold", "-hold", "--keep-open", "--wait", "--noclose", "--stay-open", "--keep", "--keepalive":
       return true
-  false
+    else: discard
+  return false
+
+# Build terminal argv for the major terminals in a unified way.
+proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string; shArgs: seq[string]): seq[string] =
+  var argv = termArgs
+  case base
+  of "gnome-terminal", "kgx":
+    argv.add "--"
+    argv.add shExe
+    for a in shArgs: argv.add a
+  of "wezterm":
+    argv = @["start"] & argv
+    argv.add shExe
+    for a in shArgs: argv.add a
+  of "kitty":
+    argv.add "-e"
+    argv.add shExe
+    for a in shArgs: argv.add a
+  else:
+    argv.add "-e"
+    argv.add shExe
+    for a in shArgs: argv.add a
+  return argv
+
 
 proc runCommand(cmd: string) =
   let bash = findExe("bash")
   let shExe = if bash.len > 0: bash else: "/bin/sh"
 
-  var parts = splitArgs(chooseTerminal())
+  var parts = tokenize(chooseTerminal())
   if parts.len == 0:
-    # headless
+    # Headless fallback
     let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
-    let shArgs = (if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd])
+    let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
     return
 
   let exe = parts[0]
   let exePath = findExe(exe)
   if exePath.len == 0:
+    # Terminal binary not found; fallback to shell
     let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
-    let shArgs = (if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd])
+    let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
     return
 
-  var termArgs = (if parts.len > 1: parts[1..^1] else: @[])
+  var termArgs = if parts.len > 1: parts[1..^1] else: @[]
   let base = exe.extractFilename()
-  let hold = hasHoldFlag(termArgs)
 
-  # If the terminal will hold the window, skip adding `read _`
+  # If the user passed a hold flag to the terminal, skip adding 'read _'.
+  let hold = hasHoldFlagLocal(termArgs)
   let fullCmd =
     if hold: cmd
     else:    cmd & "; echo; echo '[Press Enter to close]'; read _"
 
-  let shArgs = (if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd])
+  let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+  let argv = buildTerminalArgs(base, termArgs, shExe, shArgs)
 
-  # Build argv per terminal
-  if base == "gnome-terminal" or base == "kgx":
-    termArgs.add "--"
-    termArgs.add shExe
-    for a in shArgs: termArgs.add a
-  elif base == "wezterm":
-    termArgs = @["start"] & termArgs
-    termArgs.add shExe
-    for a in shArgs: termArgs.add a
-  elif base == "kitty":
-    # compat path proved most reliable
-    termArgs.add "-e"
-    termArgs.add shExe
-    for a in shArgs: termArgs.add a
-  else:
-    # xterm-style (alacritty, foot, konsole, xfce4-terminal, xterm…)
-    termArgs.add "-e"
-    termArgs.add shExe
-    for a in shArgs: termArgs.add a
-
-  discard startProcess(exePath, args = termArgs, options = {poDaemon})
+  discard startProcess(exePath, args = argv, options = {poDaemon})
 
 
 proc openUrl(url: string) =
@@ -134,9 +129,6 @@ proc applyTheme*(cfg: var Config; name: string) =
       currentThemeIndex = i
       return
 
-
-
-
 proc updateParsedColors(cfg: var Config) =
   ## Resolve hex → pixel colours.
   cfg.bgColor          = parseColor(cfg.bgColorHex)
@@ -144,6 +136,15 @@ proc updateParsedColors(cfg: var Config) =
   cfg.highlightBgColor = parseColor(cfg.highlightBgColorHex)
   cfg.highlightFgColor = parseColor(cfg.highlightFgColorHex)
   cfg.borderColor      = parseColor(cfg.borderColorHex)
+
+proc applyThemeAndColors*(cfg: var Config; name: string; doNotify = true) =
+  ## Sets theme hex fields, resolves pixels, updates GUI colors, and (optionally) notifies + redraws.
+  applyTheme(cfg, name)
+  updateParsedColors(cfg)
+  gui.updateGuiColors()
+  if doNotify:
+    gui.notifyThemeChanged(name)
+    gui.redrawWindow()
 
 proc saveLastTheme(cfgPath: string) =
   ## Update or insert [theme].last_chosen = "<name>" in the TOML file.
@@ -180,11 +181,7 @@ proc saveLastTheme(cfgPath: string) =
 proc cycleTheme*(cfg: var Config) =
   currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
   let th = themeList[currentThemeIndex]
-  applyTheme(cfg, th.name)
-  gui.notifyThemeChanged(th.name)
-  updateParsedColors(cfg)
-  gui.updateGuiColors()
-  gui.redrawWindow()
+  applyThemeAndColors(cfg, th.name)        # does apply + parse + gui + notify + redraw
   saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
 
 # ── Applications discovery ──────────────────────────────────────────────
@@ -333,19 +330,6 @@ proc initLauncherConfig() =
   # Recompute derived state
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
 
-proc subseqSpans(q, t: string): seq[(int,int)] =
-  ## Return 1-char spans in t matching q as a subsequence (case-insensitive).
-  if q.len == 0 or t.len == 0: return @[]
-  let lq = q.toLowerAscii
-  let lt = t.toLowerAscii
-  var qi = 0
-  for i in 0 ..< lt.len:
-    if qi < lq.len and lt[i] == lq[qi]:
-      result.add (i, 1)
-      inc qi
-      if qi == lq.len: break
-
-
 # ── Fuzzy match helper ─────────────────────────────────────────────────
 # Return positions of q matched as subsequence in t (lowercase), or @[] if no match
 proc subseqPositions(q, t: string): seq[int] =
@@ -353,12 +337,18 @@ proc subseqPositions(q, t: string): seq[int] =
   let lq = q.toLowerAscii
   let lt = t.toLowerAscii
   var qi = 0
-  for i, ch in lt:
-    if qi < lq.len and ch == lq[qi]:
+  for i in 0 ..< lt.len:
+    if qi < lq.len and lt[i] == lq[qi]:
       result.add i
       inc qi
-      if qi == lq.len: break
-  if result.len != lq.len: result.setLen(0)
+      if qi == lq.len: return
+  result.setLen(0)
+
+proc subseqSpans(q, t: string): seq[(int,int)] =
+  ## Return 1-char spans in t matching q as a subsequence (case-insensitive).
+  let posns = subseqPositions(q, t)
+  for p in posns:
+    result.add (p, 1)
 
 proc isWordBoundary(lt: string; idx: int): bool =
   if idx <= 0: return true
@@ -375,73 +365,85 @@ proc scoreMatch(q, t: string): (int, seq[int]) =
   let pos = lt.find(lq)
   if pos >= 0:
     var s = 1000
-    if pos == 0: s += 200                       # prefix bonus
-    if isWordBoundary(lt, pos): s += 80         # word boundary start
-    s += max(0, 60 - (t.len - q.len))           # shorter names a bit higher
+    if pos == 0: s += 200               # prefix bonus
+    if isWordBoundary(lt, pos): s += 80 # word boundary start
+    s += max(0, 60 - (t.len - q.len))   # shorter names a bit higher
     return (s, toSeq(pos ..< pos + lq.len))
 
   # Otherwise, subsequence
   let posns = subseqPositions(q, t)
   if posns.len == 0: return (-1_000_000, @[])   # not a match
 
-  var score = 0
-  # Consecutive streak bonus
   var longest = 1
   var cur = 1
+  var gaps = 0
   for i in 1 ..< posns.len:
     if posns[i] == posns[i-1] + 1:
       inc cur
       if cur > longest: longest = cur
     else:
+      gaps += posns[i] - posns[i-1] - 1
       cur = 1
-  score += longest * 25
 
-  # Gap penalty (prefer tighter matches)
-  var gaps = 0
-  for i in 1 ..< posns.len:
-    gaps += (posns[i] - posns[i-1] - 1)
-  score -= gaps * 3
+  var score = longest * 25 - gaps * 3
 
-  # Word-boundary bonus for each matched char at a word start
   for p in posns:
     if isWordBoundary(lt, p): score += 8
 
-  # First char at start bonus
   if posns[0] == 0: score += 25
-
-  # Light length bias
   score += max(0, 40 - (t.len - q.len))
 
   (score, posns)
 
+
+type WebSpec = tuple[prefix, label, base: string, kind: ActionKind]
+
+const webSpecs: array[3, WebSpec] = [
+  (prefix: "/y ", label: "Search YouTube: ", base: "https://www.youtube.com/results?search_query=", kind: akYouTube),
+  (prefix: "/g ", label: "Search Google: ",  base: "https://www.google.com/search?q=",            kind: akGoogle),
+  (prefix: "/w ", label: "Search Wiki: ",    base: "https://en.wikipedia.org/wiki/Special:Search?search=", kind: akWiki)
+]
+
+
 # ── Build actions & mirror to filteredApps ─────────────────────────────
+proc visibleQuery(inputText: string): string =
+  ## Strip any trigger prefix (/c, /y, /g, /w, /<cmd>) for highlight purposes.
+  if not inputText.startsWith("/"): return inputText
+  if inputText.startsWith("/c "): return inputText[3..^1].strip()
+  for spec in webSpecs:
+    if inputText.startsWith(spec.prefix):
+      return inputText[spec.prefix.len .. ^1].strip()
+  if inputText.len > 1: return inputText[1..^1].strip()
+  ""
+
 proc buildActions() =
   actions.setLen(0)
 
+  var handled = false
+
+  # Config search
   if inputText.startsWith("/c "):
     for a in scanConfigFiles(inputText[3..^1].strip()):
       actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
+    handled = true
+  else:
+    # Web specs (/y, /g, /w) handled via small table
+    for spec in webSpecs:
+      if inputText.startsWith(spec.prefix):
+        let q = inputText[spec.prefix.len .. ^1].strip()
+        actions.add Action(kind: spec.kind, label: spec.label & q,
+                           exec: spec.base & encodeUrl(q))
+        handled = true
+        break
 
-  elif inputText.startsWith("/y "):
-    let q = inputText[3..^1].strip()
-    actions.add Action(kind: akYouTube, label: "Search YouTube: " & q,
-                       exec:  "https://www.youtube.com/results?search_query=" & encodeUrl(q))
-
-  elif inputText.startsWith("/g "):
-    let q = inputText[3..^1].strip()
-    actions.add Action(kind: akGoogle, label: "Search Google: " & q,
-                       exec:  "https://www.google.com/search?q=" & encodeUrl(q))
-
-  elif inputText.startsWith("/w "):
-    let q = inputText[3..^1].strip()
-    actions.add Action(kind: akWiki, label: "Search Wiki: " & q,
-                       exec:  "https://en.wikipedia.org/wiki/Special:Search?search=" & encodeUrl(q))
-
-  elif inputText.startsWith("/") and inputText.len > 1:
+  # Direct shell (/ ...)
+  if (not handled) and inputText.startsWith("/") and inputText.len > 1:
     let cmd = inputText[1..^1].strip()
     actions.add Action(kind: akRun, label: "Run: " & cmd, exec: cmd)
+    handled = true
 
-  else:
+  # App list (MRU or fuzzy)
+  if not handled:
     if inputText.len == 0:
       # MRU first, then the rest (unchanged)
       var seen = initHashSet[string]()
@@ -455,32 +457,26 @@ proc buildActions() =
         if not seen.contains(app.name):
           actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
     else:
-      # ── SMART FUZZY: rank by score ─────────────────────────────────────
+      # SMART FUZZY: rank by score
       var ranked: seq[(int, Action)] = @[]
       for app in allApps:
-        let (s, _) = scoreMatch(inputText, app.name)     # <- add scoreMatch proc separately
-        if s > -1_000_000:                                # keep only matches
+        let (s, _) = scoreMatch(inputText, app.name)
+        if s > -1_000_000:
           ranked.add (s, Action(kind: akApp, label: app.name, exec: app.exec, appData: app))
       ranked.sort(proc(a, b: (int, Action)): int =
         result = cmp(b[0], a[0])                          # score desc
-        if result == 0: result = cmpIgnoreCase(a[1].label, b[1].label)  # tiebreak by name
+        if result == 0: result = cmpIgnoreCase(a[1].label, b[1].label)
       )
       actions.setLen(0)
       for it in ranked: actions.add it[1]
 
-    # Mirror to filteredApps + compute highlight spans
+  # Mirror to filteredApps + compute highlight spans
   filteredApps = @[]
   matchSpans   = @[]
 
   # Derive the visible query (strip trigger prefix for highlighting)
-  let isSlash = inputText.startsWith("/")
-  var q = inputText
-  if isSlash:
-    if inputText.startsWith("/c ") or inputText.startsWith("/g ") or
-       inputText.startsWith("/y ") or inputText.startsWith("/w "):
-      q = inputText[3..^1].strip()
-    else:
-      q = (if inputText.len > 1: inputText[1..^1].strip() else: "")
+  let q = visibleQuery(inputText)
+
 
   for act in actions:
     filteredApps.add DesktopApp(
@@ -498,7 +494,7 @@ proc buildActions() =
         matchSpans.add subseqSpans(q, act.label)
 
       of akYouTube, akGoogle, akWiki:
-        # labels look like "Search X: " & q — fuzzy only within the query tail
+        # labels like "Search X: " & q — fuzzy only within the query tail
         let off = max(0, act.label.len - q.len)
         let seg = if off < act.label.len: act.label[off .. ^1] else: ""
         let spansRel = subseqSpans(q, seg)
@@ -518,8 +514,6 @@ proc buildActions() =
 
   selectedIndex = 0
   viewOffset    = 0
-
-
 
 # ── Perform selected action ─────────────────────────────────────────────
 proc performAction(a: Action) =

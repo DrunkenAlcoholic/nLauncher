@@ -28,7 +28,7 @@ proc stripFieldCodes(s: string): string =
 
 # Tokenize a shell-ish command line into args, respecting quotes and backslashes.
 # Not a full shell parser; good enough for Exec= lines.
-proc tokenize(cmd: string): seq[string] =
+proc tokenize*(cmd: string): seq[string] =
   var cur = newStringOfCap(32)
   var i = 0
   var inQuote = '\0'
