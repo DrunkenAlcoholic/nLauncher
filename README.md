@@ -11,7 +11,7 @@
 
 | Feature                            | Notes                                                                                          |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Typo‑tolerant fuzzy search**     | `firefx` → “Firefox”                                                                           |
+| **Fast fuzzy search**     | `firefx` → “Firefox”                                                                           |
 | **Live clock**                     | Small HH:mm clock in the bottom‑right                                                         |
 | **Sub‑1 ms startup (bench mode)**  | `--bench` flag for raw launch timing                                                          |
 | **Recent‑apps history**            | Empty query shows your last launches first                                                    |
@@ -115,6 +115,7 @@ fgColorHex             = "#D8DEE9"
 highlightBgColorHex    = "#88C0D0"
 highlightFgColorHex    = "#2E3440"
 borderColorHex         = "#4C566A"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Dracula"
@@ -123,6 +124,7 @@ fgColorHex             = "#F8F8F2"
 highlightBgColorHex    = "#BD93F9"
 highlightFgColorHex    = "#282A36"
 borderColorHex         = "#44475A"
+matchFgColorHex        = "#FFA500"
 
 # …add or remove more [[themes]] blocks as desired…
 

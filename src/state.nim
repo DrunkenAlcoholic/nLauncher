@@ -2,10 +2,10 @@
 ## state.nim — centralised data definitions & global state
 ## MIT; see LICENSE for details.
 ##
-## This module is intentionally logic‑free.  It defines:
+## This module is intentionally logic-free. It defines:
 ## • App/cache/config structures
 ## • Runtime state variables
-## • Small immutable project‑wide constants
+## • Small immutable project-wide constants
 ##
 ## All fields accessed by other modules are exported with `*`.
 
@@ -18,7 +18,7 @@ type
     name*, exec*: string
     hasIcon*: bool               ## Whether an icon path exists.
 
-  ## Payload cached to `~/.cache/nLauncher/apps.json`.
+  ## Payload cached to `~/.cache/nlauncher/apps.json`.
   CacheData* = object
     usrMtime*, localMtime*: int64
     apps*: seq[DesktopApp]
@@ -30,7 +30,7 @@ type
     lineHeight*, maxVisibleItems*: int
     centerWindow*: bool
     positionX*, positionY*: int
-    verticalAlign*: string        ## "top" | "center" | "one‑third"
+    verticalAlign*: string        ## "top" | "center" | "one-third"
 
     # Colours as hex strings (resolved to pixels in `gui.initGui`)
     bgColorHex*, fgColorHex*: string
@@ -43,10 +43,10 @@ type
     fontName*: string
     themeName*: string
     terminalExe*: string          ## Preferred terminal program
+    matchFgColorHex*: string     ## color for matched letters (e.g. "#FF00FF")
 
     # Resolved X pixel colours (set once the X connection is live)
     bgColor*, fgColor*, highlightBgColor*, highlightFgColor*, borderColor*: culong
-
 
 type
   ## What kind of thing the user can pick.
@@ -60,11 +60,10 @@ type
 
   ## A single selectable entry in the launcher.
   Action* = object
-    kind*:   ActionKind
+    kind*:    ActionKind
     label*:   string   # what gets drawn (e.g. "Firefox" or "Run: ls")
-    exec*:   string   # what actually gets executed or opened
+    exec*:    string   # what actually gets executed or opened
     appData*: DesktopApp  # optional for akApp; empty for other kinds
-
 
 type
   Theme* = object
@@ -74,6 +73,7 @@ type
     highlightBgColorHex*: string
     highlightFgColorHex*: string
     borderColorHex*: string
+    matchFgColorHex*: string
 
 # ── X11 handles (set in `gui.initGui`) ──────────────────────────────────
 var
@@ -92,20 +92,21 @@ var
   viewOffset*:    int               ## First visible item row
   shouldExit*:    bool
   benchMode*:     bool = false      ## `--bench` flag (minimal redraws)
-  recentApps*:    seq[string]       ## Most‑recent‑first app names
-  seenMapNotify*:  bool = false     ## swallow first FocusOut after map
-  themeList*: seq[Theme]
+  recentApps*:    seq[string]       ## Most-recent-first app names
+  seenMapNotify*: bool = false      ## swallow first FocusOut after map
+  themeList*:     seq[Theme]
+  matchSpans*: seq[seq[(int,int)]]   ## per row: list of (start, len) spans to highlight
 
 # ── Constants ───────────────────────────────────────────────────────────
 const
-  ## Hard‑coded terminal fallback search order.
+  ## Hard-coded terminal fallback search order.
   fallbackTerms* = [
     "kitty", "alacritty", "wezterm", "foot",
     "gnome-terminal", "konsole", "xfce4-terminal", "xterm"
   ]
   maxRecent* = 10
 
-# ── Defaults as TOML text ────────────────────────────────────────────────
+# ── Defaults as TOML text ───────────────────────────────────────────────
 const defaultToml* = """
 [window]
 width = 500                  # Width of the launcher window
@@ -117,6 +118,7 @@ vertical_align = "one-third" # Options "top" "center" "one-third"
 
 [font]
 fontname = "Noto Sans:size=12" # Set your font
+match_color = "#FFA500"
 
 [input]
 prompt = "> "               # Prompt Character Left side
@@ -136,6 +138,7 @@ fgColorHex             = "#D8DEE9"
 highlightBgColorHex    = "#88C0D0"
 highlightFgColorHex    = "#2E3440"
 borderColorHex         = "#8BE9FD"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Ayu Dark"
@@ -144,6 +147,7 @@ fgColorHex             = "#BFBDB6"
 highlightBgColorHex    = "#59C2FF"
 highlightFgColorHex    = "#0F1419"
 borderColorHex         = "#1F2328"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Ayu Light"
@@ -152,6 +156,7 @@ fgColorHex             = "#5C6773"
 highlightBgColorHex    = "#399EE6"
 highlightFgColorHex    = "#FAFAFA"
 borderColorHex         = "#F0F0F0"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Catppuccin Frappe"
@@ -160,6 +165,7 @@ fgColorHex             = "#C6D0F5"
 highlightBgColorHex    = "#8CAAEE"
 highlightFgColorHex    = "#303446"
 borderColorHex         = "#414559"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Catppuccin Latte"
@@ -168,6 +174,7 @@ fgColorHex             = "#4C4F69"
 highlightBgColorHex    = "#1E66F5"
 highlightFgColorHex    = "#EFF1F5"
 borderColorHex         = "#BCC0CC"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Catppuccin Macchiato"
@@ -176,6 +183,7 @@ fgColorHex             = "#CAD3F5"
 highlightBgColorHex    = "#8AADF4"
 highlightFgColorHex    = "#24273A"
 borderColorHex         = "#363A4F"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Catppuccin Mocha"
@@ -184,6 +192,7 @@ fgColorHex             = "#CDD6F4"
 highlightBgColorHex    = "#89B4FA"
 highlightFgColorHex    = "#1E1E2E"
 borderColorHex         = "#313244"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Cobalt"
@@ -192,6 +201,7 @@ fgColorHex             = "#FFFFFF"
 highlightBgColorHex    = "#007ACC"
 highlightFgColorHex    = "#002240"
 borderColorHex         = "#003366"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Charcoal Dark" #https://github.com/mubin6th/charcoal
@@ -200,6 +210,7 @@ fgColorHex             = "#C0A179"
 highlightBgColorHex    = "#35291D"
 highlightFgColorHex    = "#D6B891"
 borderColorHex         = "#887254"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Charcoal Light" #https://github.com/mubin6th/charcoal
@@ -208,6 +219,7 @@ fgColorHex             = "#35291d"
 highlightBgColorHex    = "#a28662"
 highlightFgColorHex    = "#120f09"
 borderColorHex         = "#66553f"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Dracula"
@@ -216,6 +228,7 @@ fgColorHex             = "#F8F8F2"
 highlightBgColorHex    = "#BD93F9"
 highlightFgColorHex    = "#282A36"
 borderColorHex         = "#44475A"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "GitHub Dark"
@@ -224,6 +237,7 @@ fgColorHex             = "#E6EDF3"
 highlightBgColorHex    = "#388BFD"
 highlightFgColorHex    = "#0D1117"
 borderColorHex         = "#30363D"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "GitHub Light"
@@ -232,6 +246,7 @@ fgColorHex             = "#1F2328"
 highlightBgColorHex    = "#0969DA"
 highlightFgColorHex    = "#FFFFFF"
 borderColorHex         = "#D1D9E0"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Gruvbox Dark"
@@ -240,6 +255,7 @@ fgColorHex             = "#EBDBB2"
 highlightBgColorHex    = "#83A598"
 highlightFgColorHex    = "#282828"
 borderColorHex         = "#3C3836"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Gruvbox Light"
@@ -248,6 +264,7 @@ fgColorHex             = "#3C3836"
 highlightBgColorHex    = "#83A598"
 highlightFgColorHex    = "#FBF1C7"
 borderColorHex         = "#EBDBB2"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Legacy"
@@ -256,6 +273,7 @@ fgColorHex             = "#aec2e0"
 highlightBgColorHex    = "#1b232c"
 highlightFgColorHex    = "#aec2e0"
 borderColorHex         = "#324357"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Material Dark"
@@ -264,6 +282,7 @@ fgColorHex             = "#ECEFF1"
 highlightBgColorHex    = "#FFAB40"
 highlightFgColorHex    = "#263238"
 borderColorHex         = "#37474F"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Material Light"
@@ -272,6 +291,7 @@ fgColorHex             = "#212121"
 highlightBgColorHex    = "#FFAB40"
 highlightFgColorHex    = "#FAFAFA"
 borderColorHex         = "#BDBDBD"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Mellow Contrast"
@@ -280,6 +300,7 @@ fgColorHex             = "#f8f8f2"
 highlightBgColorHex    = "#13110f"
 highlightFgColorHex    = "#f8f8f2"
 borderColorHex         = "#7a7267"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Monokai"
@@ -288,6 +309,7 @@ fgColorHex             = "#F8F8F2"
 highlightBgColorHex    = "#66D9EF"
 highlightFgColorHex    = "#272822"
 borderColorHex         = "#49483E"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Monokai Pro"
@@ -296,6 +318,7 @@ fgColorHex             = "#FCFCFA"
 highlightBgColorHex    = "#78DCE8"
 highlightFgColorHex    = "#2D2A2E"
 borderColorHex         = "#5B595C"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Nord"
@@ -304,6 +327,7 @@ fgColorHex             = "#D8DEE9"
 highlightBgColorHex    = "#88C0D0"
 highlightFgColorHex    = "#2E3440"
 borderColorHex         = "#4C566A"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "One Dark"
@@ -312,6 +336,7 @@ fgColorHex             = "#ABB2BF"
 highlightBgColorHex    = "#61AFEF"
 highlightFgColorHex    = "#282C34"
 borderColorHex         = "#3E4451"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "One Light"
@@ -320,6 +345,7 @@ fgColorHex             = "#383A42"
 highlightBgColorHex    = "#4078F2"
 highlightFgColorHex    = "#FAFAFA"
 borderColorHex         = "#E5E5E6"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Palenight"
@@ -328,6 +354,7 @@ fgColorHex             = "#EEFFFF"
 highlightBgColorHex    = "#82AAFF"
 highlightFgColorHex    = "#292D3E"
 borderColorHex         = "#444267"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Solarized Dark"
@@ -336,6 +363,7 @@ fgColorHex             = "#839496"
 highlightBgColorHex    = "#268BD2"
 highlightFgColorHex    = "#002B36"
 borderColorHex         = "#073642"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Solarized Light"
@@ -344,6 +372,7 @@ fgColorHex             = "#657B83"
 highlightBgColorHex    = "#268BD2"
 highlightFgColorHex    = "#FDF6E3"
 borderColorHex         = "#EEE8D5"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Synthwave 84"
@@ -352,6 +381,7 @@ fgColorHex             = "#FFFFFF"
 highlightBgColorHex    = "#F92AAD"
 highlightFgColorHex    = "#2A2139"
 borderColorHex         = "#495495"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Tokyo Night"
@@ -360,6 +390,7 @@ fgColorHex             = "#A9B1D6"
 highlightBgColorHex    = "#7AA2F7"
 highlightFgColorHex    = "#1A1B26"
 borderColorHex         = "#32344A"
+matchFgColorHex        = "#FFA500"
 
 [[themes]]
 name                   = "Tokyo Night Light"
@@ -368,6 +399,7 @@ fgColorHex             = "#343B58"
 highlightBgColorHex    = "#34548A"
 highlightFgColorHex    = "#D5D6DB"
 borderColorHex         = "#CBCCD1"
+matchFgColorHex        = "#FFA500"
 
 # remember last used
 [theme]

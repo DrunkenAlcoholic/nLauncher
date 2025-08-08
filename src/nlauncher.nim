@@ -1,8 +1,8 @@
 # src/nLauncher.nim
 ## nLauncher.nim — main program with Action abstraction and fixes
 ## MIT; see LICENSE for details.
-## Requires Nim ≥ 2.0 with x11 & xft packages.
-## Startup in --bench mode still completes in ~1–2 ms on a modern system.
+## Requires Nim ≥ 2.0 with x11 & xft packages.
+## Startup in --bench mode still completes in ~1–2 ms on a modern system.
 
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, osproc, strutils, options, tables, sequtils,
@@ -11,46 +11,107 @@ import parsetoml as toml
 import x11/[xlib, x, xutil, keysym]
 import ./[state, parser, gui, utils]
 
-# ── Module‑local globals ────────────────────────────────────────────────
+# ── Module-local globals ────────────────────────────────────────────────
 var
   currentThemeIndex = 0           ## Active index into `themeList`
   actions*: seq[Action]           ## Current selectable actions
 
 # ── Utility procs ──────────────────────────────────────────────────────
-proc runCommand(cmd: string) =
-  ## Execute *cmd* in the chosen terminal, else headless.
-  let term = chooseTerminal()
-  # Debug: show which terminal and command are being used
-  #echo "DEBUG ▶ runCommand: term='", term, "' cmd='", cmd, "'"
+proc splitArgs(s: string): seq[string] =
+  var cur = newStringOfCap(16); var q = '\0'
+  for c in s:
+    if q == '\0':
+      case c
+      of ' ', '\t':
+        if cur.len > 0: result.add cur; cur.setLen(0)
+      of '"', '\'': q = c
+      else: cur.add c
+    else:
+      if c == q: q = '\0' else: cur.add c
+  if cur.len > 0: result.add cur
 
-  if term.len > 0:
-    #echo "DEBUG ▶ launching via terminal: ", term, " -e sh -c ", cmd
-    discard startProcess("/usr/bin/env",
-      args = [term, "-e", "sh", "-c", cmd], options = {poDaemon})
+proc hasHoldFlag(args: seq[string]): bool =
+  for a in args:
+    if a == "--hold" or a == "--keep-open":
+      return true
+  false
+
+proc runCommand(cmd: string) =
+  let bash = findExe("bash")
+  let shExe = if bash.len > 0: bash else: "/bin/sh"
+
+  var parts = splitArgs(chooseTerminal())
+  if parts.len == 0:
+    # headless
+    let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
+    let shArgs = (if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd])
+    discard startProcess(shExe, args = shArgs, options = {poDaemon})
+    return
+
+  let exe = parts[0]
+  let exePath = findExe(exe)
+  if exePath.len == 0:
+    let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
+    let shArgs = (if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd])
+    discard startProcess(shExe, args = shArgs, options = {poDaemon})
+    return
+
+  var termArgs = (if parts.len > 1: parts[1..^1] else: @[])
+  let base = exe.extractFilename()
+  let hold = hasHoldFlag(termArgs)
+
+  # If the terminal will hold the window, skip adding `read _`
+  let fullCmd =
+    if hold: cmd
+    else:    cmd & "; echo; echo '[Press Enter to close]'; read _"
+
+  let shArgs = (if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd])
+
+  # Build argv per terminal
+  if base == "gnome-terminal" or base == "kgx":
+    termArgs.add "--"
+    termArgs.add shExe
+    for a in shArgs: termArgs.add a
+  elif base == "wezterm":
+    termArgs = @["start"] & termArgs
+    termArgs.add shExe
+    for a in shArgs: termArgs.add a
+  elif base == "kitty":
+    # compat path proved most reliable
+    termArgs.add "-e"
+    termArgs.add shExe
+    for a in shArgs: termArgs.add a
   else:
-    #echo "DEBUG ▶ launching via shell: /bin/sh -c ", cmd
-    discard startProcess("/bin/sh",
-      args = ["-c", cmd], options = {poDaemon})
+    # xterm-style (alacritty, foot, konsole, xfce4-terminal, xterm…)
+    termArgs.add "-e"
+    termArgs.add shExe
+    for a in shArgs: termArgs.add a
+
+  discard startProcess(exePath, args = termArgs, options = {poDaemon})
+
 
 proc openUrl(url: string) =
-  ## Open *url* via `xdg-open` in the background using the shell.
-  discard startProcess("/bin/sh",
-    args = @["-c", "xdg-open \"" & url & "\" &"], options = {poDaemon})
+  ## Open *url* via xdg-open without a shell (quote-safe).
+  discard startProcess("/usr/bin/env",
+    args = @["xdg-open", url],
+    options = {poDaemon})
 
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return config files matching *query*.
   let base = getHomeDir() / ".config"
+  let ql = query.toLowerAscii
   for path in walkDirRec(base):
-    if fileExists(path) and path.extractFilename.toLower.contains(query.toLower):
-      result.add DesktopApp(
-        name:     path.extractFilename,
-        exec:     "xdg-open " & shellQuote(path),
-        hasIcon:  false
-      )
+    if fileExists(path):
+      let fn = path.extractFilename
+      if fn.len > 0 and fn.toLowerAscii.contains(ql):
+        result.add DesktopApp(
+          name:     fn,
+          exec:     "xdg-open " & shellQuote(path),
+          hasIcon:  false
+        )
 
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
-  ## Copy colours from named theme into *cfg* and record the name.
   for i, th in themeList:
     if th.name.toLower == name.toLower:
       cfg.bgColorHex          = th.bgColorHex
@@ -58,9 +119,13 @@ proc applyTheme*(cfg: var Config; name: string) =
       cfg.highlightBgColorHex = th.highlightBgColorHex
       cfg.highlightFgColorHex = th.highlightFgColorHex
       cfg.borderColorHex      = th.borderColorHex
-      cfg.themeName           = th.name            # ← record the chosen theme
+      # NEW: if theme provides a per-theme match color, prefer it; else keep current/global
+      if th.matchFgColorHex.len > 0:
+        cfg.matchFgColorHex = th.matchFgColorHex
+      cfg.themeName           = th.name
       currentThemeIndex       = i
       return
+
 
 proc updateParsedColors(cfg: var Config) =
   ## Resolve hex → pixel colours.
@@ -71,20 +136,36 @@ proc updateParsedColors(cfg: var Config) =
   cfg.borderColor      = parseColor(cfg.borderColorHex)
 
 proc saveLastTheme(cfgPath: string) =
+  ## Update or insert [theme].last_chosen = "<name>" in the TOML file.
   var lines = readFile(cfgPath).splitLines()
   var inTheme = false
+  var updated = false
+  var themeSectionFound = false
+
   for i in 0..<lines.len:
     let l = lines[i].strip()
     if l == "[theme]":
-      inTheme = true; continue
+      inTheme = true
+      themeSectionFound = true
+      continue
     if inTheme:
       if l.startsWith("[") and l.endsWith("]"):
+        lines.insert("last_chosen = \"" & config.themeName & "\"", i)
+        updated = true
         break
       if l.startsWith("last_chosen"):
         lines[i] = "last_chosen = \"" & config.themeName & "\""
+        updated = true
         break
-  writeFile(cfgPath, join(lines, "\n"))
 
+  if not themeSectionFound:
+    lines.add("")
+    lines.add("[theme]")
+    lines.add("last_chosen = \"" & config.themeName & "\"")
+    updated = true
+
+  if updated:
+    writeFile(cfgPath, lines.join("\n"))
 
 proc cycleTheme*(cfg: var Config) =
   currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
@@ -94,8 +175,6 @@ proc cycleTheme*(cfg: var Config) =
   updateParsedColors(cfg)
   gui.updateGuiColors()
   gui.redrawWindow()
-
-  # now config.themeName is set correctly:
   saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
 
 # ── Applications discovery ──────────────────────────────────────────────
@@ -143,13 +222,12 @@ proc loadApplications() =
     except:
       echo "Warning: cache not saved."
 
-
 # ── Load & apply config from TOML ───────────────────────────────────────────
 proc initLauncherConfig() =
   ## Initialize defaults, then override via TOML.
-  config = Config()  # zero‑init
+  config = Config()  # zero-init
 
-  # In‑code defaults (fallbacks)
+  # In-code defaults (fallbacks)
   config.winWidth        = 500
   config.lineHeight      = 22
   config.maxVisibleItems = 10
@@ -160,8 +238,9 @@ proc initLauncherConfig() =
   config.fontName        = "Noto Sans:size=12"
   config.prompt          = "> "
   config.cursor          = "_"
-  config.terminalExe     = "gnome-terminal"
+  config.terminalExe     = "gnome-terminal"   # current default kept
   config.borderWidth     = 2
+  config.matchFgColorHex    = "#FFA500"
 
   # Ensure TOML config exists
   let cfgDir  = getHomeDir() / ".config" / "nlauncher"
@@ -186,6 +265,7 @@ proc initLauncherConfig() =
   # ── font section ───────────────────────────────────────────────────────
   let f = tbl["font"]
   config.fontName = f["fontname"].getStr(config.fontName)
+  config.matchFgColorHex = f["match_color"].getStr("#FF00FF")
 
   # ── input section ──────────────────────────────────────────────────────
   let inp = tbl["input"]
@@ -210,45 +290,128 @@ proc initLauncherConfig() =
       fgColorHex:          th["fgColorHex"].getStr(""),
       highlightBgColorHex: th["highlightBgColorHex"].getStr(""),
       highlightFgColorHex: th["highlightFgColorHex"].getStr(""),
-      borderColorHex:      th["borderColorHex"].getStr("")
+      borderColorHex:      th["borderColorHex"].getStr(""),
+      matchFgColorHex:     th.getOrDefault("matchFgColorHex").getStr("")
     )
 
   # ── last_chosen ────────────────────────────────────────────────────────
   let lastName = tbl["theme"]["last_chosen"].getStr("")
   var pickedIndex = -1
-  
-  # Try to find the saved theme in the list
+
+  # Try to find the saved theme in the list (case-insensitive)
   if lastName.len > 0:
     for i, th in themeList:
-      if th.name == lastName:
+      if th.name.toLowerAscii == lastName.toLowerAscii:
         pickedIndex = i
         break
-  
+
   # Fallback to the first theme if not found
   if pickedIndex < 0:
     if themeList.len > 0:
       pickedIndex = 0
     else:
       quit("nLauncher error: no themes defined in nlauncher.toml")
-  
+
   # Apply the chosen theme
   let chosen = themeList[pickedIndex].name
   config.themeName = chosen
   applyTheme(config, chosen)
-  
+
   # If we fell back, persist the new choice
   if chosen != lastName:
     saveLastTheme(cfgPath)
-  
+
   # Recompute derived state
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
 
+proc subseqSpans(q, t: string): seq[(int,int)] =
+  ## Return 1-char spans in t matching q as a subsequence (case-insensitive).
+  if q.len == 0 or t.len == 0: return @[]
+  let lq = q.toLowerAscii
+  let lt = t.toLowerAscii
+  var qi = 0
+  for i in 0 ..< lt.len:
+    if qi < lq.len and lt[i] == lq[qi]:
+      result.add (i, 1)
+      inc qi
+      if qi == lq.len: break
+
+
 # ── Fuzzy match helper ─────────────────────────────────────────────────
+# Return positions of q matched as subsequence in t (lowercase), or @[] if no match
+proc subseqPositions(q, t: string): seq[int] =
+  if q.len == 0: return @[]
+  let lq = q.toLowerAscii
+  let lt = t.toLowerAscii
+  var qi = 0
+  for i, ch in lt:
+    if qi < lq.len and ch == lq[qi]:
+      result.add i
+      inc qi
+      if qi == lq.len: break
+  if result.len != lq.len: result.setLen(0)
+
+proc isWordBoundary(lt: string; idx: int): bool =
+  if idx <= 0: return true
+  let c = lt[idx-1]
+  return c == ' ' or c == '-' or c == '_' or c == '.' or c == '/'
+
+# Compute a score for how well t matches q; higher is better. Returns (score, positions)
+proc scoreMatch(q, t: string): (int, seq[int]) =
+  if q.len == 0: return (0, @[])
+  let lq = q.toLowerAscii
+  let lt = t.toLowerAscii
+
+  # Exact substring gets big boost
+  let pos = lt.find(lq)
+  if pos >= 0:
+    var s = 1000
+    if pos == 0: s += 200                       # prefix bonus
+    if isWordBoundary(lt, pos): s += 80         # word boundary start
+    s += max(0, 60 - (t.len - q.len))           # shorter names a bit higher
+    return (s, toSeq(pos ..< pos + lq.len))
+
+  # Otherwise, subsequence
+  let posns = subseqPositions(q, t)
+  if posns.len == 0: return (-1_000_000, @[])   # not a match
+
+  var score = 0
+  # Consecutive streak bonus
+  var longest = 1
+  var cur = 1
+  for i in 1 ..< posns.len:
+    if posns[i] == posns[i-1] + 1:
+      inc cur
+      if cur > longest: longest = cur
+    else:
+      cur = 1
+  score += longest * 25
+
+  # Gap penalty (prefer tighter matches)
+  var gaps = 0
+  for i in 1 ..< posns.len:
+    gaps += (posns[i] - posns[i-1] - 1)
+  score -= gaps * 3
+
+  # Word-boundary bonus for each matched char at a word start
+  for p in posns:
+    if isWordBoundary(lt, p): score += 8
+
+  # First char at start bonus
+  if posns[0] == 0: score += 25
+
+  # Light length bias
+  score += max(0, 40 - (t.len - q.len))
+
+  (score, posns)
+
 proc betterFuzzyMatch(q, t: string): bool =
   ## Substring → editDistance ≤2 → subsequence fallback
   let lq = q.toLowerAscii
   let lt = t.toLowerAscii
-  if lq.len == 0 or lt.contains(lq): return true
+  if lq.len == 0: return true
+  if lt.contains(lq): return true
+  if lt.startsWith(lq): return true
   if editDistanceAscii(lq, lt) <= 2: return true
   var qi = 0
   for ch in lt:
@@ -259,75 +422,91 @@ proc betterFuzzyMatch(q, t: string): bool =
 # ── Build actions & mirror to filteredApps ─────────────────────────────
 proc buildActions() =
   actions.setLen(0)
+
   if inputText.startsWith("/c "):
     for a in scanConfigFiles(inputText[3..^1].strip()):
       actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
+
   elif inputText.startsWith("/y "):
     let q = inputText[3..^1].strip()
     actions.add Action(kind: akYouTube, label: "Search YouTube: " & q,
                        exec:  "https://www.youtube.com/results?search_query=" & encodeUrl(q))
+
   elif inputText.startsWith("/g "):
     let q = inputText[3..^1].strip()
     actions.add Action(kind: akGoogle, label: "Search Google: " & q,
                        exec:  "https://www.google.com/search?q=" & encodeUrl(q))
+
   elif inputText.startsWith("/w "):
     let q = inputText[3..^1].strip()
     actions.add Action(kind: akWiki, label: "Search Wiki: " & q,
                        exec:  "https://en.wikipedia.org/wiki/Special:Search?search=" & encodeUrl(q))
+
   elif inputText.startsWith("/") and inputText.len > 1:
     let cmd = inputText[1..^1].strip()
-    #echo "DEBUG ▶ slash-trigger detected, cmd = '", cmd, "'"   # ← debug print
     actions.add Action(kind: akRun, label: "Run: " & cmd, exec: cmd)
+
   else:
     if inputText.len == 0:
+      # MRU first, then the rest (unchanged)
       var seen = initHashSet[string]()
       for name in recentApps:
         for app in allApps:
           if app.name == name:
-            actions.add Action(kind: akApp, label: app.name,
-                               exec: app.exec, appData: app)
+            actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
             seen.incl name
             break
       for app in allApps:
         if not seen.contains(app.name):
-          actions.add Action(kind: akApp, label: app.name,
-                             exec: app.exec, appData: app)
+          actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
     else:
+      # ── SMART FUZZY: rank by score ─────────────────────────────────────
+      var ranked: seq[(int, Action)] = @[]
       for app in allApps:
-        if betterFuzzyMatch(inputText, app.name):
-          actions.add Action(kind: akApp, label: app.name,
-                             exec: app.exec, appData: app)
+        let (s, _) = scoreMatch(inputText, app.name)     # <- add scoreMatch proc separately
+        if s > -1_000_000:                                # keep only matches
+          ranked.add (s, Action(kind: akApp, label: app.name, exec: app.exec, appData: app))
+      ranked.sort(proc(a, b: (int, Action)): int =
+        result = cmp(b[0], a[0])                          # score desc
+        if result == 0: result = cmpIgnoreCase(a[1].label, b[1].label)  # tiebreak by name
+      )
+      actions.setLen(0)
+      for it in ranked: actions.add it[1]
 
+  # Mirror to filteredApps + compute highlight spans
   filteredApps = @[]
+  matchSpans   = @[]
   for act in actions:
     filteredApps.add DesktopApp(
       name:    act.label,
       exec:    act.exec,
       hasIcon: (act.kind == akApp and act.appData.hasIcon)
     )
+    if inputText.len == 0:
+      matchSpans.add @[]
+    else:
+      matchSpans.add subseqSpans(inputText, act.label)  # per-char spans you already added
+
   selectedIndex = 0
   viewOffset    = 0
+
 
 # ── Perform selected action ─────────────────────────────────────────────
 proc performAction(a: Action) =
   case a.kind
   of akRun:
-    #echo "DEBUG ▶ about to run: ", a.exec
     runCommand(a.exec)
   of akYouTube, akGoogle, akWiki:
     openUrl(a.exec)
-  of akConfig, akApp:
+  of akConfig:
+    discard startProcess("/bin/sh", args = ["-c", a.exec], options={poDaemon})
+  of akApp:
     discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()], options={poDaemon})
-    #if a.kind == akConfig:
-    #  discard startProcess("/bin/sh", args = ["-c", a.exec], options={poDaemon})
-    #else:
-    #  discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()], options={poDaemon})
-    if a.kind == akApp:
-      if a.label in recentApps:
-        recentApps.delete(recentApps.find(a.label))
-      recentApps.insert(a.label, 0)
-      if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
-      saveRecent()
+    if a.label in recentApps:
+      recentApps.delete(recentApps.find(a.label))
+    recentApps.insert(a.label, 0)
+    if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
+    saveRecent()
   shouldExit = true
 
 # ── Key handling ────────────────────────────────────────────────────────
@@ -366,9 +545,9 @@ proc main() =
   timeIt "Load Applications:" : loadApplications()
   timeIt "Load Recent Apps:"  :  loadRecent()
   timeIt "Build Actions:"     : buildActions()
-  
+
   initGui()
-  
+
   timeIt "updateParsedColors:"      :  updateParsedColors(config)
   timeIt "updateGuiColors:"         : gui.updateGuiColors()
   timeIt "Benchmark(Redraw Frame):" : gui.redrawWindow()
@@ -376,37 +555,26 @@ proc main() =
   if benchMode:
     quit 0
 
-
   while not shouldExit:
     var ev: XEvent
     discard XNextEvent(display, ev.addr)
     case ev.theType
-
     of MapNotify:
-      # window was just mapped; next FocusOut is spurious → swallow it
       if ev.xmap.window == window:
         seenMapNotify = true
-
     of Expose:
       gui.redrawWindow()
-
     of KeyPress:
       handleKeyPress(ev)
       if not shouldExit:
         gui.redrawWindow()
-
     of ButtonPress:
-      # any click (inside or outside) closes launcher
       shouldExit = true
-
     of FocusOut:
       if seenMapNotify:
-        # discard this one, reset flag
         seenMapNotify = false
       else:
-        # real blur → exit
         shouldExit = true
-
     else:
       discard
 

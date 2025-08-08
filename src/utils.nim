@@ -2,16 +2,16 @@
 ## utils.nim — shared helper routines
 ## MIT; see LICENSE for details.
 ##
-## This unit is *side‑effect‑free* except for:
+## This unit is *side-effect-free* except for:
 ##   • colour allocation on an open X11 display
-##   • recent‑application JSON persistence
+##   • recent-application JSON persistence
 ##
 ## All exported symbols are marked with `*`.
 
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, strutils, times, json, math]
 import x11/[xlib, x, xft, xrender]
-import state           # display*, screen*, config, fallbackTerms, recentApps
+import state
 
 ## Quote *s* for safe use inside a shell command.
 proc shellQuote*(s: string): string =
@@ -23,82 +23,91 @@ proc shellQuote*(s: string): string =
       result.add(ch)
   result.add("'")
 
+# ── Small shared helper (DRY for color parsing) ─────────────────────────
+## Parse "#RRGGBB" into 16-bit RGB components. Returns false on bad input.
+proc parseHexRgb(hex: string; r, g, b: var uint16): bool =
+  if hex.len != 7 or hex[0] != '#': return false
+  try:
+    let r8 = parseHexInt(hex[1..2])
+    let g8 = parseHexInt(hex[3..4])
+    let b8 = parseHexInt(hex[5..6])
+    r = uint16(r8 * 257)
+    g = uint16(g8 * 257)
+    b = uint16(b8 * 257)
+    true
+  except:
+    false
+
 # ── Executable discovery ────────────────────────────────────────────────
-## Returns true if an executable *name* can be found in $PATH.
+## Returns true if an executable *name* can be found in $PATH (or a path).
 proc whichExists*(name: string): bool =
+  # If it's an explicit path, just check presence.
+  if name.contains('/') and fileExists(name):
+    return true
+  # Use stdlib PATH resolver first (handles executability & PATH semantics).
+  let hit = findExe(name)
+  if hit.len > 0:
+    return true
+  # Defensive fallback (odd PATH envs).
   for dir in getEnv("PATH").split(':'):
+    if dir.len == 0: continue
     if fileExists(dir / name):
       return true
-  return false
+  false
 
 ## Pick a terminal emulator: prefer `config.terminalExe`, then `$TERMINAL`,
 ## otherwise iterate over `fallbackTerms` from `state.nim`.
 proc chooseTerminal*(): string =
-  ## Debug: show what we read from config
-  #echo "DEBUG ▶ chooseTerminal: config.terminalExe = '", config.terminalExe, "'"
   # 1) if user explicitly set a terminal, trust it
   if config.terminalExe.len > 0:
     return config.terminalExe
 
-  # 2) if $TERMINAL is set and executable, use it
+  # 2) if $TERMINAL is set and resolvable, use it
   let envTerm = getEnv("TERMINAL")
-  if envTerm.len > 0 and (fileExists(envTerm) or whichExists(envTerm)):
-    #echo "DEBUG  chooseTerminal: using $TERMINAL='", envTerm, "'"
+  if envTerm.len > 0 and whichExists(envTerm):
     return envTerm
 
   # 3) otherwise, pick from known list
   for t in fallbackTerms:
     if whichExists(t):
-      #echo "DEBUG ▶ chooseTerminal: falling back to '", t, "'"
       return t
 
   # 4) nothing found → headless
-  #echo "DEBUG ▶ chooseTerminal: no terminal found, running headless"
   return ""
 
 # ── Timing helper (for --bench mode) ────────────────────────────────────
 template timeIt*(msg: string, body: untyped) =
-  ## Inline timing macro — prints *msg* and elapsed seconds.
+  ## Inline timing macro — prints *msg* and elapsed milliseconds if benchMode.
   let t0 = epochTime()
   body
-  if benchMode :
-    # compute elapsed milliseconds
+  if benchMode:
     let elapsed = (epochTime() - t0) * 1000.0
-    # format with fixed 3 decimal places
-    echo msg, " ", elapsed.formatFloat(ffDecimal, 3), " ms"
+    echo msg, " ", elapsed.formatFloat(ffDecimal, 3), " ms"
 
 # ── Colour utilities (used by gui & launcher) ───────────────────────────
 proc parseColor*(hex: string): culong =
   ## Convert "#RRGGBB" → X pixel; returns 0 on failure.
-  if not (hex.len == 7 and hex[0] == '#'):
+  var r, g, b: uint16
+  if not parseHexRgb(hex, r, g, b):
     return 0
-  try:
-    let r = parseHexInt(hex[1..2])
-    let g = parseHexInt(hex[3..4])
-    let b = parseHexInt(hex[5..6])
-    var c: XColor
-    c.red   = uint16(r * 257)
-    c.green = uint16(g * 257)
-    c.blue  = uint16(b * 257)
-    c.flags = cast[cchar](DoRed or DoGreen or DoBlue)
-    if XAllocColor(display, XDefaultColormap(display, screen), c.addr) == 0:
-      return 0
-    result = c.pixel
-  except:
-    result = 0               # invalid hex, parseHexInt overflow…
-
+  var c: XColor
+  c.red   = r
+  c.green = g
+  c.blue  = b
+  c.flags = cast[cchar](DoRed or DoGreen or DoBlue)
+  if XAllocColor(display, XDefaultColormap(display, screen), c.addr) == 0:
+    return 0
+  c.pixel
 
 proc allocXftColor*(hex: string, dest: var XftColor) =
   ## Allocate an XftColor for the current `display`/`screen`.
-  if not (hex.len == 7 and hex[0] == '#'):
+  var r, g, b: uint16
+  if not parseHexRgb(hex, r, g, b):
     quit "invalid colour: " & hex
-  let r = parseHexInt(hex[1..2])
-  let g = parseHexInt(hex[3..4])
-  let b = parseHexInt(hex[5..6])
   var rc: XRenderColor
-  rc.red   = uint16(r * 257)
-  rc.green = uint16(g * 257)
-  rc.blue  = uint16(b * 257)
+  rc.red   = r
+  rc.green = g
+  rc.blue  = b
   rc.alpha = 65535
   if XftColorAllocValue(display,
                         DefaultVisual(display, screen),
@@ -106,7 +115,7 @@ proc allocXftColor*(hex: string, dest: var XftColor) =
                         rc.addr, dest.addr) == 0:
     quit "XftColorAllocValue failed for " & hex
 
-# ── Recent‑apps persistence ─────────────────────────────────────────────
+# ── Recent-apps persistence ─────────────────────────────────────────────
 let recentFile* = getHomeDir() / ".cache" / "nlauncher" / "recent.json"
 
 proc loadRecent*() =
@@ -124,4 +133,4 @@ proc saveRecent*() =
     createDir(recentFile.parentDir)
     writeFile(recentFile, pretty(%state.recentApps))
   except:
-    discard         # non‑fatal
+    discard         # non-fatal
