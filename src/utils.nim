@@ -24,6 +24,53 @@ proc shellQuote*(s: string): string =
   result.add("'")
 
 # ── Small shared helper (DRY for color parsing) ─────────────────────────
+# Convert "#RRGGBB" to 8-bit ints; returns false on bad input.
+proc hexToRgb8(hex: string; r, g, b: var int): bool =
+  if hex.len != 7 or hex[0] != '#': return false
+  try:
+    r = parseHexInt(hex[1..2]); g = parseHexInt(hex[3..4]); b = parseHexInt(hex[5..6]); true
+  except: false
+
+# sRGB → linear
+proc srgbToLin(c: float): float =
+  if c <= 0.04045: c / 12.92 else: pow((c + 0.055) / 1.055, 2.4)
+
+# Relative luminance (WCAG)
+proc relLuma(hex: string): float =
+  var r8, g8, b8: int
+  if not hexToRgb8(hex, r8, g8, b8): return 0.0
+  let r = srgbToLin(r8.float / 255.0)
+  let g = srgbToLin(g8.float / 255.0)
+  let b = srgbToLin(b8.float / 255.0)
+  0.2126*r + 0.7152*g + 0.0722*b
+
+# Contrast ratio (WCAG)
+proc contrastRatio(aHex, bHex: string): float =
+  let a = relLuma(aHex); let b = relLuma(bHex)
+  let (L1, L2) = if a > b: (a, b) else: (b, a)
+  (L1 + 0.05) / (L2 + 0.05)
+
+# Choose an accent that pops against bg and isn’t identical to fg
+proc pickAccentColor*(bgHex, fgHex, hBgHex, hFgHex: string): string =
+  var candidates = @[
+    hBgHex, hFgHex,
+    "#f8c291",   # amber
+    "#00BFFF",   # deep sky blue
+    "#FF4D4D",   # soft red
+    "#00E676"    # green accent
+  ]
+  var best = "#f8c291"
+  var bestScore = -1.0
+  for c in candidates:
+    if c.len != 7: continue
+    let cr = contrastRatio(bgHex, c)
+    # prefer high contrast; lightly penalize being too close to fg contrast
+    let crFg = contrastRatio(fgHex, c)
+    let score = cr*100.0 - abs(cr - crFg)*2.0
+    if score > bestScore:
+      bestScore = score; best = c
+  best
+
 ## Parse "#RRGGBB" into 16-bit RGB components. Returns false on bad input.
 proc parseHexRgb(hex: string; r, g, b: var uint16): bool =
   if hex.len != 7 or hex[0] != '#': return false

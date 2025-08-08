@@ -119,16 +119,21 @@ proc applyTheme*(cfg: var Config; name: string) =
       cfg.highlightBgColorHex = th.highlightBgColorHex
       cfg.highlightFgColorHex = th.highlightFgColorHex
       cfg.borderColorHex      = th.borderColorHex
-      # NEW: theme-owned match color, fallback to highlightFg, then amber
-      if th.matchFgColorHex.len > 0:
+
+      # NEW: theme-owned match color selection
+      let m = th.matchFgColorHex.toLowerAscii
+      if m.len > 0 and m != "auto":
         cfg.matchFgColorHex = th.matchFgColorHex
-      elif cfg.matchFgColorHex.len == 0:
-        cfg.matchFgColorHex = cfg.highlightFgColorHex
-        if cfg.matchFgColorHex.len == 0:
-          cfg.matchFgColorHex = "#f8c291"
-      cfg.themeName           = th.name
-      currentThemeIndex       = i
+      else:
+        # derive from theme accents, fallback to amber
+        cfg.matchFgColorHex = pickAccentColor(
+          cfg.bgColorHex, cfg.fgColorHex, cfg.highlightBgColorHex, cfg.highlightFgColorHex
+        )
+
+      cfg.themeName     = th.name
+      currentThemeIndex = i
       return
+
 
 
 
@@ -463,22 +468,57 @@ proc buildActions() =
       actions.setLen(0)
       for it in ranked: actions.add it[1]
 
-  # Mirror to filteredApps + compute highlight spans
+    # Mirror to filteredApps + compute highlight spans
   filteredApps = @[]
   matchSpans   = @[]
+
+  # Derive the visible query (strip trigger prefix for highlighting)
+  let isSlash = inputText.startsWith("/")
+  var q = inputText
+  if isSlash:
+    if inputText.startsWith("/c ") or inputText.startsWith("/g ") or
+       inputText.startsWith("/y ") or inputText.startsWith("/w "):
+      q = inputText[3..^1].strip()
+    else:
+      q = (if inputText.len > 1: inputText[1..^1].strip() else: "")
+
   for act in actions:
     filteredApps.add DesktopApp(
       name:    act.label,
       exec:    act.exec,
       hasIcon: (act.kind == akApp and act.appData.hasIcon)
     )
-    if inputText.len == 0:
+
+    if inputText.len == 0 or q.len == 0:
       matchSpans.add @[]
     else:
-      matchSpans.add subseqSpans(inputText, act.label)  # per-char spans you already added
+      case act.kind
+      of akApp, akConfig:
+        # normal list items: fuzzy against the visible query
+        matchSpans.add subseqSpans(q, act.label)
+
+      of akYouTube, akGoogle, akWiki:
+        # labels look like "Search X: " & q — fuzzy only within the query tail
+        let off = max(0, act.label.len - q.len)
+        let seg = if off < act.label.len: act.label[off .. ^1] else: ""
+        let spansRel = subseqSpans(q, seg)
+        var spansAbs: seq[(int,int)] = @[]
+        for (s, l) in spansRel: spansAbs.add (off + s, l)
+        matchSpans.add spansAbs
+
+      of akRun:
+        # label is "Run: " & q — fuzzy only within the command part
+        const prefix = "Run: "
+        let off = if act.label.len >= prefix.len: prefix.len else: 0
+        let seg = if off < act.label.len: act.label[off .. ^1] else: ""
+        let spansRel = subseqSpans(q, seg)
+        var spansAbs: seq[(int,int)] = @[]
+        for (s, l) in spansRel: spansAbs.add (off + s, l)
+        matchSpans.add spansAbs
 
   selectedIndex = 0
   viewOffset    = 0
+
 
 
 # ── Perform selected action ─────────────────────────────────────────────

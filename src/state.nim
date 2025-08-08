@@ -146,7 +146,7 @@ fgColorHex             = "#BFBDB6"
 highlightBgColorHex    = "#59C2FF"
 highlightFgColorHex    = "#0F1419"
 borderColorHex         = "#1F2328"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "Ayu Light"
@@ -155,7 +155,7 @@ fgColorHex             = "#5C6773"
 highlightBgColorHex    = "#399EE6"
 highlightFgColorHex    = "#FAFAFA"
 borderColorHex         = "#F0F0F0"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "Catppuccin Frappe"
@@ -164,7 +164,7 @@ fgColorHex             = "#C6D0F5"
 highlightBgColorHex    = "#8CAAEE"
 highlightFgColorHex    = "#303446"
 borderColorHex         = "#414559"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "Catppuccin Latte"
@@ -173,7 +173,7 @@ fgColorHex             = "#4C4F69"
 highlightBgColorHex    = "#1E66F5"
 highlightFgColorHex    = "#EFF1F5"
 borderColorHex         = "#BCC0CC"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "Catppuccin Macchiato"
@@ -182,7 +182,7 @@ fgColorHex             = "#CAD3F5"
 highlightBgColorHex    = "#8AADF4"
 highlightFgColorHex    = "#24273A"
 borderColorHex         = "#363A4F"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "Catppuccin Mocha"
@@ -200,7 +200,7 @@ fgColorHex             = "#FFFFFF"
 highlightBgColorHex    = "#007ACC"
 highlightFgColorHex    = "#002240"
 borderColorHex         = "#003366"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "Charcoal Dark" #https://github.com/mubin6th/charcoal
@@ -209,7 +209,7 @@ fgColorHex             = "#C0A179"
 highlightBgColorHex    = "#35291D"
 highlightFgColorHex    = "#D6B891"
 borderColorHex         = "#887254"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "Charcoal Light" #https://github.com/mubin6th/charcoal
@@ -218,7 +218,7 @@ fgColorHex             = "#35291d"
 highlightBgColorHex    = "#a28662"
 highlightFgColorHex    = "#120f09"
 borderColorHex         = "#66553f"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "Dracula"
@@ -227,7 +227,7 @@ fgColorHex             = "#F8F8F2"
 highlightBgColorHex    = "#BD93F9"
 highlightFgColorHex    = "#282A36"
 borderColorHex         = "#44475A"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "auto"
 
 [[themes]]
 name                   = "GitHub Dark"
