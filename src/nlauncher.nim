@@ -119,12 +119,17 @@ proc applyTheme*(cfg: var Config; name: string) =
       cfg.highlightBgColorHex = th.highlightBgColorHex
       cfg.highlightFgColorHex = th.highlightFgColorHex
       cfg.borderColorHex      = th.borderColorHex
-      # NEW: if theme provides a per-theme match color, prefer it; else keep current/global
+      # NEW: theme-owned match color, fallback to highlightFg, then amber
       if th.matchFgColorHex.len > 0:
         cfg.matchFgColorHex = th.matchFgColorHex
+      elif cfg.matchFgColorHex.len == 0:
+        cfg.matchFgColorHex = cfg.highlightFgColorHex
+        if cfg.matchFgColorHex.len == 0:
+          cfg.matchFgColorHex = "#f8c291"
       cfg.themeName           = th.name
       currentThemeIndex       = i
       return
+
 
 
 proc updateParsedColors(cfg: var Config) =
@@ -240,7 +245,7 @@ proc initLauncherConfig() =
   config.cursor          = "_"
   config.terminalExe     = "gnome-terminal"   # current default kept
   config.borderWidth     = 2
-  config.matchFgColorHex    = "#FFA500"
+  config.matchFgColorHex = "#f8c291"
 
   # Ensure TOML config exists
   let cfgDir  = getHomeDir() / ".config" / "nlauncher"
@@ -265,7 +270,6 @@ proc initLauncherConfig() =
   # ── font section ───────────────────────────────────────────────────────
   let f = tbl["font"]
   config.fontName = f["fontname"].getStr(config.fontName)
-  config.matchFgColorHex = f["match_color"].getStr("#FF00FF")
 
   # ── input section ──────────────────────────────────────────────────────
   let inp = tbl["input"]
