@@ -6,7 +6,7 @@
 
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, osproc, strutils, options, tables, sequtils,
-             json, times, editdistance, uri, sets, algorithm]
+             json, times, uri, sets, algorithm]
 import parsetoml as toml
 import x11/[xlib, x, xutil, keysym]
 import ./[state, parser, gui, utils]
@@ -408,20 +408,6 @@ proc scoreMatch(q, t: string): (int, seq[int]) =
   score += max(0, 40 - (t.len - q.len))
 
   (score, posns)
-
-proc betterFuzzyMatch(q, t: string): bool =
-  ## Substring → editDistance ≤2 → subsequence fallback
-  let lq = q.toLowerAscii
-  let lt = t.toLowerAscii
-  if lq.len == 0: return true
-  if lt.contains(lq): return true
-  if lt.startsWith(lq): return true
-  if editDistanceAscii(lq, lt) <= 2: return true
-  var qi = 0
-  for ch in lt:
-    if qi < lq.len and lq[qi] == ch: inc qi
-    if qi == lq.len: return true
-  false
 
 # ── Build actions & mirror to filteredApps ─────────────────────────────
 proc buildActions() =

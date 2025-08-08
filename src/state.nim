@@ -137,7 +137,7 @@ fgColorHex             = "#D8DEE9"
 highlightBgColorHex    = "#88C0D0"
 highlightFgColorHex    = "#2E3440"
 borderColorHex         = "#8BE9FD"
-matchFgColorHex        = "#f8c291"
+matchFgColorHex        = "#f8c291"  # Optional key to change the matching text highlighted color per theme, default is "#f8c291"
 
 [[themes]]
 name                   = "Ayu Dark"

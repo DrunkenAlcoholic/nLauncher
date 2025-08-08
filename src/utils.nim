@@ -9,7 +9,7 @@
 ## All exported symbols are marked with `*`.
 
 # ── Imports ─────────────────────────────────────────────────────────────
-import std/[os, strutils, times, json, math]
+import std/[os, osproc, strutils, times, json, math]
 import x11/[xlib, x, xft, xrender]
 import state
 

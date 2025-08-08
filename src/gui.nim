@@ -330,7 +330,7 @@ proc redrawWindow*() =
   drawThemeOverlay()
 
   let nowStr = now().format("HH:mm")
-  let cw = textWidth(nowStr)
+  let cw = textWidth(nowStr, true)
   let cx = config.winWidth - int(cw) - 2
   let cy = config.winMaxHeight - 8
   XftDrawStringUtf8(xftDraw, cast[PXftColor](addr xftColorFg), overlayFont,

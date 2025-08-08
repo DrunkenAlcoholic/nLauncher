@@ -11,7 +11,8 @@
 
 | Feature                            | Notes                                                                                          |
 | ---------------------------------- | ---------------------------------------------------------------------------------------------- |
-| **Fast fuzzy search**     | `firefx` → “Firefox”                                                                           |
+| **Scored fuzzy search**     | Better ranking on prefixes, word starts, tight matches.
+| **Per-character match highlighting**  | Matching letters are bold & colored (theme-configurable)                                                                          |
 | **Live clock**                     | Small HH:mm clock in the bottom‑right                                                         |
 | **Sub‑1 ms startup (bench mode)**  | `--bench` flag for raw launch timing                                                          |
 | **Recent‑apps history**            | Empty query shows your last launches first                                                    |
@@ -78,7 +79,7 @@ nimble release   # produces ./bin/nlauncher
 The first time you run `nlauncher`, it creates:
 
 ```
-~/.config/nLauncher/nlauncher.toml
+~/.config/nlauncher/nlauncher.toml
 ```
 
 Copy & paste this skeleton or edit in place:
@@ -115,7 +116,7 @@ fgColorHex             = "#D8DEE9"
 highlightBgColorHex    = "#88C0D0"
 highlightFgColorHex    = "#2E3440"
 borderColorHex         = "#4C566A"
-matchFgColorHex        = "#FFA500"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "Dracula"
@@ -124,7 +125,7 @@ fgColorHex             = "#F8F8F2"
 highlightBgColorHex    = "#BD93F9"
 highlightFgColorHex    = "#282A36"
 borderColorHex         = "#44475A"
-matchFgColorHex        = "#FFA500"
+matchFgColorHex        = "#f8c291"
 
 # …add or remove more [[themes]] blocks as desired…
 
