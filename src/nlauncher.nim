@@ -84,19 +84,23 @@ proc openUrl(url: string) =
   discard startProcess("/usr/bin/env", args = @["xdg-open", url], options = {poDaemon})
 
 # ── Small searches: ~/.config helper ────────────────────────────────────
-proc scanConfigFiles*(query: string): seq[DesktopApp] =
-  ## Return entries from ~/.config matching `query` (case-insensitive).
+proc scoreMatch(q, t, fullPath, home: string): int
+
+proc scanConfigFiles*(query: string): seq[(int, DesktopApp)] =
+  ## Return scored entries from ~/.config matching `query`.
   let base = getHomeDir() / ".config"
-  let ql = query.toLowerAscii
+  let home = getHomeDir()
   for path in walkDirRec(base):
     if fileExists(path):
       let fn = path.extractFilename
-      if fn.len > 0 and fn.toLowerAscii.contains(ql):
-        result.add DesktopApp(
-          name: fn,
-          exec: "xdg-open " & shellQuote(path),
-          hasIcon: false
-        )
+      if fn.len > 0:
+        let s = scoreMatch(query, fn, path, home)
+        if s > -1_000_000:
+          result.add (s, DesktopApp(
+            name: fn,
+            exec: "xdg-open " & shellQuote(path),
+            hasIcon: false
+          ))
 
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
@@ -354,6 +358,23 @@ proc isWordBoundary(lt: string; idx: int): bool =
   let c = lt[idx-1]
   c == ' ' or c == '-' or c == '_' or c == '.' or c == '/'
 
+proc levenshtein(a, b: string): int =
+  ## Compute simple Levenshtein edit distance between *a* and *b*.
+  let n = a.len
+  let m = b.len
+  if n == 0: return m
+  if m == 0: return n
+  var prev = newSeq[int](m + 1)
+  var curr = newSeq[int](m + 1)
+  for j in 0 .. m: prev[j] = j
+  for i in 1 .. n:
+    curr[0] = i
+    for j in 1 .. m:
+      let cost = if a[i-1] == b[j-1]: 0 else: 1
+      curr[j] = min(min(curr[j-1] + 1, prev[j] + 1), prev[j-1] + cost)
+    swap(prev, curr)
+  prev[m]
+
 proc scoreMatch(q, t, fullPath, home: string): int =
   ## Heuristic score for matching q against t (higher is better).
   if q.len == 0: return -1_000_000
@@ -367,6 +388,10 @@ proc scoreMatch(q, t, fullPath, home: string): int =
     if pos == 0: s += 200
     if isWordBoundary(lt, pos): s += 80
     s += max(0, 60 - (t.len - q.len))
+  else:
+    let dist = levenshtein(lq, lt)
+    if dist <= 2:
+      s = 500 - dist * 100
 
   if t == q: s += 9000
   elif t.toLowerAscii == lq: s += 8600
@@ -389,7 +414,7 @@ const webSpecs: array[3, WebSpec] = [
 type CmdKind = enum
   ## Recognised input prefixes.
   ckNone,        # no special prefix
-  ckTheme,       # `/t`
+  ckTheme,       # `t:`
   ckConfig,      # `c:`
   ckWeb,         # `y:`, `g:`, `w:`
   ckRun          # raw `/` command
@@ -401,15 +426,14 @@ proc parseCommand(inputText: string): (CmdKind, string, int) =
 
   if takePrefix(inputText, "c:", rest):
     return (ckConfig, rest, -1)
+  if takePrefix(inputText, "t:", rest):
+    return (ckTheme, rest, -1)
   for i, spec in webSpecs:
     if takePrefix(inputText, spec.prefix, rest):
       return (ckWeb, rest, i)
 
   if not inputText.startsWith("/"):
     return (ckNone, inputText, -1)
-
-  if takePrefix(inputText, "/t", rest):
-    return (ckTheme, rest, -1)
 
   discard takePrefix(inputText, "/", rest)
   (ckRun, rest, -1)
@@ -429,13 +453,23 @@ proc buildActions() =
 
   case cmd
   of ckTheme:
-    let ql = rest.toLowerAscii
+    var themes: seq[(int, Theme)] = @[]
     for th in themeList:
-      if ql.len == 0 or th.name.toLowerAscii.contains(ql):
-        actions.add Action(kind: akTheme, label: th.name, exec: th.name)
+      let s = scoreMatch(rest, th.name, th.name, "")
+      if s > -1_000_000:
+        themes.add (s, th)
+    themes.sort(proc(a, b: (int, Theme)): int = cmp(b[0], a[0]))
+    let limit = min(themes.len, config.maxVisibleItems)
+    for i in 0..<limit:
+      let th = themes[i][1]
+      actions.add Action(kind: akTheme, label: th.name, exec: th.name)
   of ckConfig:
-    for a in scanConfigFiles(rest):
-      actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
+    var cfgs = scanConfigFiles(rest)
+    cfgs.sort(proc(a, b: (int, DesktopApp)): int = cmp(b[0], a[0]))
+    let limit = min(cfgs.len, config.maxVisibleItems)
+    for i in 0..<limit:
+      let app = cfgs[i][1]
+      actions.add Action(kind: akConfig, label: app.name, exec: app.exec)
   of ckWeb:
     let spec = webSpecs[webIdx]
     actions.add Action(kind: spec.kind,
