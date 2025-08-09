@@ -385,38 +385,23 @@ const webSpecs: array[3, WebSpec] = [
 proc visibleQuery(inputText: string): string =
   ## Return the user's query sans command prefix so highlight works.
   ## Handles: /c, /t, web specs (/y,/g,/w), and generic "/".
+  ## Must stay in sync with buildActions.
   if not inputText.startsWith("/"):
     return inputText
 
-  let n = inputText.len
+  var rest: string
 
-  # Fast path for /c and /t
-  if n >= 2:
-    let p2 = inputText[0..1]
-    if p2 == "/c" or p2 == "/t":
-      if n == 2: return ""
-      if inputText[2] == ' ':
-        if n > 3: return inputText[3..^1].strip()
-        else: return ""
-      return inputText[2..^1].strip()
+  if takePrefix(inputText, "/c", rest):
+    return rest
+  if takePrefix(inputText, "/t", rest):
+    return rest
 
-  # Web specs: /y, /g, /w (or any future entries in webSpecs)
   for spec in webSpecs:
-    let p = spec.prefix
-    let m = p.len
-    if n >= m and inputText[0..m-1] == p:
-      if n == m: return ""
-      if inputText[m] == ' ':
-        if n > m+1: return inputText[m+1..^1].strip()
-        else: return ""
-      return inputText[m..^1].strip()
+    if takePrefix(inputText, spec.prefix, rest):
+      return rest
 
-  # Generic "/" run
-  if n > 1:
-    if inputText[1] == ' ':
-      if n > 2: return inputText[2..^1].strip()
-      else: return ""
-    return inputText[1..^1].strip()
+  if takePrefix(inputText, "/", rest):
+    return rest
 
   ""
 
