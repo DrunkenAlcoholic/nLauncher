@@ -12,6 +12,7 @@ import ./[state, parser, gui, utils]
 var
   currentThemeIndex = 0 ## active theme index in `themeList`
   actions*: seq[Action] ## transient list for the UI
+  configFileCache: seq[string] ## cached ~/.config file paths
 
 # ── Shell / process helpers ─────────────────────────────────────────────
 proc hasHoldFlagLocal(args: seq[string]): bool =
@@ -86,17 +87,39 @@ proc openUrl(url: string) =
 # ── Small searches: ~/.config helper ────────────────────────────────────
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return entries from ~/.config matching `query` (case-insensitive).
+  if query.len == 0: return
   let base = getHomeDir() / ".config"
   let ql = query.toLowerAscii
-  for path in walkDirRec(base):
-    if fileExists(path):
-      let fn = path.extractFilename
-      if fn.len > 0 and fn.toLowerAscii.contains(ql):
-        result.add DesktopApp(
-          name: fn,
-          exec: "xdg-open " & shellQuote(path),
-          hasIcon: false
-        )
+
+  let fdExe = findExe("fd")
+  if fdExe.len > 0:
+    try:
+      let outp = execProcess(fdExe, args = @["-t", "f", "-i", "-a", query, base])
+      for path in outp.splitLines():
+        if path.len == 0: continue
+        let fn = path.extractFilename
+        if fn.len > 0 and fn.toLowerAscii.contains(ql):
+          result.add DesktopApp(
+            name: fn,
+            exec: "xdg-open " & shellQuote(path),
+            hasIcon: false
+          )
+      return
+    except OSError:
+      discard
+
+  if configFileCache.len == 0:
+    for path in walkFiles(base / "**"):
+      configFileCache.add path
+
+  for path in configFileCache:
+    let fn = path.extractFilename
+    if fn.len > 0 and fn.toLowerAscii.contains(ql):
+      result.add DesktopApp(
+        name: fn,
+        exec: "xdg-open " & shellQuote(path),
+        hasIcon: false
+      )
 
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
