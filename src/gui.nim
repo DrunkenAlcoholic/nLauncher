@@ -243,9 +243,9 @@ proc initGui*() =
     )
 
 # ── Drawing routines ────────────────────────────────────────────────────
-proc drawTextHighlighted(txt: string; x, y: cint; spans: seq[(int, int)];
+proc drawText*(txt: string; x, y: cint; spans: seq[(int, int)] = @[];
     selected = false) =
-  ## Draw a row with base text plus coloured/bold overlays for *spans*.
+  ## Draw a single line with optional highlighted spans.
   let bgCol = if selected: xftColorHighlightBg else: xftColorBg
   discard XSetForeground(display, gc, bgCol)
   discard XFillRectangle(
@@ -285,27 +285,6 @@ proc drawTextHighlighted(txt: string; x, y: cint; spans: seq[(int, int)];
       seg.len.cint
     )
 
-proc drawText*(txt: string; x, y: cint; highlight = false) =
-  ## Draw a single line (prompt or simple label) with background fill.
-  let fgCol = if highlight: xftColorHighlightFg else: xftColorFg
-  let bgCol = if highlight: xftColorHighlightBg else: xftColorBg
-  discard XSetForeground(display, gc, bgCol)
-  discard XFillRectangle(
-    display, window, gc,
-    x, y - font.ascent,
-    cuint(config.winWidth),
-    cuint(config.lineHeight)
-  )
-  if txt.len > 0:
-    XftDrawStringUtf8(
-      xftDraw,
-      cast[PXftColor](addr fgCol),
-      font,
-      x, y,
-      cast[PFcChar8](txt[0].addr),
-      txt.len.cint
-    )
-
 proc redrawWindow*() =
   ## Full-frame redraw (prompt, list, overlay, border).
   discard XSetForeground(display, gc, config.bgColor)
@@ -330,7 +309,7 @@ proc redrawWindow*() =
   for idx in start ..< finish:
     let app = filteredApps[idx]
     let selected = (idx == selectedIndex)
-    drawTextHighlighted(app.name, 12, y, matchSpans[idx], selected)
+    drawText(app.name, 12, y, matchSpans[idx], selected)
     y += config.lineHeight.cint
 
   # Theme overlay (top-right)
