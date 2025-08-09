@@ -376,8 +376,7 @@ proc scoreMatch(q, t, fullPath, home: string): int =
 # ── Web shortcuts ───────────────────────────────────────────────────────
 type WebSpec = tuple[prefix, label, base: string; kind: ActionKind]
 const webSpecs: array[3, WebSpec] = [
-  ("/y", "Search YouTube: ", "https://www.youtube.com/results?search_query=",
-      akYouTube),
+  ("/y", "Search YouTube: ", "https://www.youtube.com/results?search_query=", akYouTube),
   ("/g", "Search Google: ", "https://www.google.com/search?q=", akGoogle),
   ("/w", "Search Wiki: ", "https://en.wikipedia.org/wiki/Special:Search?search=", akWiki)
 ]
