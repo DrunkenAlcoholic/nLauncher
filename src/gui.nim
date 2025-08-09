@@ -20,6 +20,7 @@ var
   xftColorFg, xftColorHighlightFg: XftColor
   xftColorMatchFg: XftColor
   xftColorBg, xftColorHighlightBg: culong
+  overlayColor: XftColor ## base colour for theme overlay
 
 # ── Overlay timing state ────────────────────────────────────────────────
 const
@@ -38,6 +39,8 @@ proc notifyThemeChanged*(name: string) =
   ## Called by the launcher whenever the active theme changes.
   currentThemeName = name
   lastThemeSwitchMs = nowMs()
+  overlayColor = xftColorFg
+  overlayColor.color.alpha = 65535'u16
 
 # ── Font helpers ────────────────────────────────────────────────────────
 proc deriveBoldFont(base: string): string =
@@ -106,15 +109,8 @@ proc drawThemeOverlay() =
   if elapsed > FadeDurationMs: return
 
   let alpha = 1.0 - (elapsed.float / FadeDurationMs.float) # 1 → 0
-  var col: XftColor
-  let r = uint16(parseHexInt(config.fgColorHex[1..2])) * 257
-  let g = uint16(parseHexInt(config.fgColorHex[3..4])) * 257
-  let b = uint16(parseHexInt(config.fgColorHex[5..6])) * 257
-  col.color.red = r
-  col.color.green = g
-  col.color.blue = b
+  var col = overlayColor
   col.color.alpha = uint16(alpha * 65535)
-  col.pixel = config.fgColor
 
   const marginX = 8
   const marginY = 6
