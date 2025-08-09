@@ -40,6 +40,13 @@ proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string;
     argv.add "-e"; argv.add shExe; for a in shArgs: argv.add a
   argv
 
+proc buildShellCommand(cmd, shExe: string; hold = false):
+  tuple[fullCmd: string, shArgs: seq[string]] =
+  ## Append hold helper and construct shell arguments.
+  let fullCmd = if hold: cmd else: cmd & "; echo; echo '[Press Enter to close]'; read _"
+  let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+  (fullCmd, shArgs)
+
 proc runCommand(cmd: string) =
   ## Run `cmd` in the user's terminal; fall back to /bin/sh if none.
   let bash = findExe("bash")
@@ -47,16 +54,14 @@ proc runCommand(cmd: string) =
 
   var parts = tokenize(chooseTerminal()) # parser.tokenize
   if parts.len == 0:
-    let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
-    let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+    let (_, shArgs) = buildShellCommand(cmd, shExe)
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
     return
 
   let exe = parts[0]
   let exePath = findExe(exe)
   if exePath.len == 0:
-    let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
-    let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+    let (_, shArgs) = buildShellCommand(cmd, shExe)
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
     return
 
@@ -64,8 +69,7 @@ proc runCommand(cmd: string) =
   let base = exe.extractFilename()
 
   let hold = hasHoldFlagLocal(termArgs)
-  let fullCmd = if hold: cmd else: cmd & "; echo; echo '[Press Enter to close]'; read _"
-  let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+  let (_, shArgs) = buildShellCommand(cmd, shExe, hold)
   let argv = buildTerminalArgs(base, termArgs, shExe, shArgs)
 
   discard startProcess(exePath, args = argv, options = {poDaemon})
