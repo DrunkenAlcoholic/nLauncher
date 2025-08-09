@@ -1,136 +1,110 @@
-# src/nLauncher.nim
-## nLauncher.nim — main program with Action abstraction and fixes
+## nLauncher.nim — main program (lean: no /f file search)
 ## MIT; see LICENSE for details.
-## Requires Nim ≥ 2.0 with x11 & xft packages.
-## Startup in --bench mode still completes in ~1–2 ms on a modern system.
 
 # ── Imports ─────────────────────────────────────────────────────────────
-import std/[os, osproc, strutils, options, tables, sequtils,
-             json, times, uri, sets, algorithm]
+import std/[os, osproc, strutils, options, tables, sequtils, json, uri, sets, algorithm, times]
 import parsetoml as toml
 import x11/[xlib, x, xutil, keysym]
 import ./[state, parser, gui, utils]
 
 # ── Module-local globals ────────────────────────────────────────────────
 var
-  currentThemeIndex = 0           ## Active index into `themeList`
-  actions*: seq[Action]           ## Current selectable actions
+  currentThemeIndex = 0               ## active theme index in `themeList`
+  actions*: seq[Action]               ## transient list for the UI
 
-# ── Utility procs ──────────────────────────────────────────────────────
-# Detect common "keep window open" flags users might pass to their terminal.
+# ── Shell / process helpers ─────────────────────────────────────────────
 proc hasHoldFlagLocal(args: seq[string]): bool =
+  ## Detect common "keep window open" flags passed to terminals.
   for a in args:
     case a
-    of "--hold", "-hold", "--keep-open", "--wait", "--noclose", "--stay-open", "--keep", "--keepalive":
+    of "--hold", "-hold", "--keep-open", "--wait", "--noclose",
+       "--stay-open", "--keep", "--keepalive":
       return true
-    else: discard
-  return false
+    else:
+      discard
+  false
 
-# Build terminal argv for the major terminals in a unified way.
 proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string; shArgs: seq[string]): seq[string] =
+  ## Normalize command-line to launch a shell inside major terminals.
   var argv = termArgs
   case base
   of "gnome-terminal", "kgx":
-    argv.add "--"
-    argv.add shExe
-    for a in shArgs: argv.add a
+    argv.add "--"; argv.add shExe; for a in shArgs: argv.add a
   of "wezterm":
-    argv = @["start"] & argv
-    argv.add shExe
-    for a in shArgs: argv.add a
+    argv = @["start"] & argv; argv.add shExe; for a in shArgs: argv.add a
   of "kitty":
-    argv.add "-e"
-    argv.add shExe
-    for a in shArgs: argv.add a
+    argv.add "-e"; argv.add shExe; for a in shArgs: argv.add a
   else:
-    argv.add "-e"
-    argv.add shExe
-    for a in shArgs: argv.add a
-  return argv
-
+    argv.add "-e"; argv.add shExe; for a in shArgs: argv.add a
+  argv
 
 proc runCommand(cmd: string) =
-  let bash = findExe("bash")
+  ## Run `cmd` in the user's terminal; fall back to /bin/sh if none.
+  let bash  = findExe("bash")
   let shExe = if bash.len > 0: bash else: "/bin/sh"
 
-  var parts = tokenize(chooseTerminal())
+  var parts = tokenize(chooseTerminal())   # parser.tokenize
   if parts.len == 0:
-    # Headless fallback
     let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
-    let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+    let shArgs  = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
     return
 
-  let exe = parts[0]
+  let exe     = parts[0]
   let exePath = findExe(exe)
   if exePath.len == 0:
-    # Terminal binary not found; fallback to shell
     let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
-    let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+    let shArgs  = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
     return
 
   var termArgs = if parts.len > 1: parts[1..^1] else: @[]
-  let base = exe.extractFilename()
+  let base     = exe.extractFilename()
 
-  # If the user passed a hold flag to the terminal, skip adding 'read _'.
-  let hold = hasHoldFlagLocal(termArgs)
-  let fullCmd =
-    if hold: cmd
-    else:    cmd & "; echo; echo '[Press Enter to close]'; read _"
-
-  let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
-  let argv = buildTerminalArgs(base, termArgs, shExe, shArgs)
+  let hold   = hasHoldFlagLocal(termArgs)
+  let fullCmd = if hold: cmd else: cmd & "; echo; echo '[Press Enter to close]'; read _"
+  let shArgs  = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+  let argv    = buildTerminalArgs(base, termArgs, shExe, shArgs)
 
   discard startProcess(exePath, args = argv, options = {poDaemon})
 
-
 proc openUrl(url: string) =
-  ## Open *url* via xdg-open without a shell (quote-safe).
-  discard startProcess("/usr/bin/env",
-    args = @["xdg-open", url],
-    options = {poDaemon})
+  ## Open *url* via xdg-open (no shell involved).
+  discard startProcess("/usr/bin/env", args = @["xdg-open", url], options = {poDaemon})
 
+# ── Small searches: ~/.config helper ────────────────────────────────────
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
-  ## Return config files matching *query*.
+  ## Return entries from ~/.config matching `query` (case-insensitive).
   let base = getHomeDir() / ".config"
-  let ql = query.toLowerAscii
+  let ql   = query.toLowerAscii
   for path in walkDirRec(base):
     if fileExists(path):
       let fn = path.extractFilename
       if fn.len > 0 and fn.toLowerAscii.contains(ql):
         result.add DesktopApp(
-          name:     fn,
-          exec:     "xdg-open " & shellQuote(path),
-          hasIcon:  false
+          name: fn,
+          exec: "xdg-open " & shellQuote(path),
+          hasIcon: false
         )
 
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
+  ## Set theme fields from `themeList` by name; respect explicit match color.
   for i, th in themeList:
-    if th.name.toLower == name.toLower:
+    if th.name.toLowerAscii == name.toLowerAscii:
       cfg.bgColorHex          = th.bgColorHex
       cfg.fgColorHex          = th.fgColorHex
       cfg.highlightBgColorHex = th.highlightBgColorHex
       cfg.highlightFgColorHex = th.highlightFgColorHex
       cfg.borderColorHex      = th.borderColorHex
-
-      # NEW: theme-owned match color selection
-      let m = th.matchFgColorHex.toLowerAscii
-      if m.len > 0 and m != "auto":
+      if th.matchFgColorHex.len > 0:
         cfg.matchFgColorHex = th.matchFgColorHex
-      else:
-        # derive from theme accents, fallback to amber
-        cfg.matchFgColorHex = pickAccentColor(
-          cfg.bgColorHex, cfg.fgColorHex, cfg.highlightBgColorHex, cfg.highlightFgColorHex
-        )
-
-      cfg.themeName     = th.name
+      cfg.themeName = th.name
       currentThemeIndex = i
-      return
+      break
 
 proc updateParsedColors(cfg: var Config) =
-  ## Resolve hex → pixel colours.
+  ## Resolve hex → pixel colours used by Xft/Xlib.
   cfg.bgColor          = parseColor(cfg.bgColorHex)
   cfg.fgColor          = parseColor(cfg.fgColorHex)
   cfg.highlightBgColor = parseColor(cfg.highlightBgColorHex)
@@ -138,7 +112,7 @@ proc updateParsedColors(cfg: var Config) =
   cfg.borderColor      = parseColor(cfg.borderColorHex)
 
 proc applyThemeAndColors*(cfg: var Config; name: string; doNotify = true) =
-  ## Sets theme hex fields, resolves pixels, updates GUI colors, and (optionally) notifies + redraws.
+  ## Apply theme, resolve colors, push to GUI, and optionally redraw.
   applyTheme(cfg, name)
   updateParsedColors(cfg)
   gui.updateGuiColors()
@@ -152,7 +126,6 @@ proc saveLastTheme(cfgPath: string) =
   var inTheme = false
   var updated = false
   var themeSectionFound = false
-
   for i in 0..<lines.len:
     let l = lines[i].strip()
     if l == "[theme]":
@@ -168,88 +141,86 @@ proc saveLastTheme(cfgPath: string) =
         lines[i] = "last_chosen = \"" & config.themeName & "\""
         updated = true
         break
-
   if not themeSectionFound:
     lines.add("")
     lines.add("[theme]")
     lines.add("last_chosen = \"" & config.themeName & "\"")
     updated = true
-
   if updated:
     writeFile(cfgPath, lines.join("\n"))
 
 proc cycleTheme*(cfg: var Config) =
+  ## Cycle to the next theme in `themeList` and persist the choice.
   currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
   let th = themeList[currentThemeIndex]
-  applyThemeAndColors(cfg, th.name)        # does apply + parse + gui + notify + redraw
+  applyThemeAndColors(cfg, th.name)
   saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
 
-# ── Applications discovery ──────────────────────────────────────────────
+# ── Applications discovery (.desktop) ───────────────────────────────────
 proc loadApplications() =
-  let usrDir   = "/usr/share/applications"
-  let locDir   = getHomeDir() / ".local/share/applications"
+  ## Scan .desktop files with caching to ~/.cache/nlauncher/apps.json.
+  let usrDir    = "/usr/share/applications"
+  let locDir    = getHomeDir() / ".local/share/applications"
   let cacheDir  = getHomeDir() / ".cache" / "nlauncher"
   let cacheFile = cacheDir / "apps.json"
 
-  let usrM = if dirExists(usrDir): getLastModificationTime(usrDir).toUnix else: 0'i64
-  let locM = if dirExists(locDir): getLastModificationTime(locDir).toUnix else: 0'i64
+  let usrM = if dirExists(usrDir): times.toUnix(getLastModificationTime(usrDir)) else: 0'i64
+  let locM = if dirExists(locDir): times.toUnix(getLastModificationTime(locDir)) else: 0'i64
 
-  # Cache hit
   if fileExists(cacheFile):
     try:
       let c = to(parseJson(readFile(cacheFile)), CacheData)
       if c.usrMtime == usrM and c.localMtime == locM:
-        timeIt "Cache hit:" :
-          allApps      = c.apps
+        timeIt "Cache hit:":
+          allApps = c.apps
           filteredApps = allApps
         return
     except:
       echo "Cache miss — rescanning …"
 
-  # Full scan
-  timeIt "Full scan:" :
+  timeIt "Full scan:":
     var dedup = initTable[string, DesktopApp]()
     for dir in @[locDir, usrDir]:
       if not dirExists(dir): continue
       for path in walkFiles(dir / "*.desktop"):
         let opt = parseDesktopFile(path)
-        if opt.isSome:
-          let app = opt.get()
+        if isSome(opt):                         # ← prefix call (or: if opt.isSome()):
+          let app = get(opt)                    # ← prefix call (or: let app = opt.get())
           let key = getBaseExec(app.exec)
           if not dedup.hasKey(key) or (app.hasIcon and not dedup[key].hasIcon):
             dedup[key] = app
+
 
     allApps = dedup.values.toSeq
     allApps.sort(proc(a, b: DesktopApp): int = cmpIgnoreCase(a.name, b.name))
     filteredApps = allApps
     try:
       createDir(cacheDir)
-      writeFile(cacheFile,
-        pretty(%CacheData(usrMtime: usrM, localMtime: locM, apps: allApps)))
+      writeFile(cacheFile, pretty(%CacheData(usrMtime: usrM, localMtime: locM, apps: allApps)))
     except:
       echo "Warning: cache not saved."
 
-# ── Load & apply config from TOML ───────────────────────────────────────────
+# ── Load & apply config from TOML ───────────────────────────────────────
 proc initLauncherConfig() =
-  ## Initialize defaults, then override via TOML.
-  config = Config()  # zero-init
+  ## Initialize defaults, read TOML, apply last theme, compute geometry.
+  config = Config() # zero-init
 
-  # In-code defaults (fallbacks)
-  config.winWidth        = 500
-  config.lineHeight      = 22
-  config.maxVisibleItems = 10
-  config.centerWindow    = true
-  config.positionX       = 20
-  config.positionY       = 50
-  config.verticalAlign   = "one-third"
-  config.fontName        = "Noto Sans:size=12"
-  config.prompt          = "> "
-  config.cursor          = "_"
-  config.terminalExe     = "gnome-terminal"   # current default kept
-  config.borderWidth     = 2
-  config.matchFgColorHex = "#f8c291"
+  # In-code defaults
+  config.winWidth         = 500
+  config.lineHeight       = 22
+  config.maxVisibleItems  = 10
+  config.centerWindow     = true
+  config.positionX        = 20
+  config.positionY        = 50
+  config.verticalAlign    = "one-third"
+  config.fontName         = "Noto Sans:size=12"
+  config.prompt           = "> "
+  config.cursor           = "_"
+  config.terminalExe      = "gnome-terminal"
+  config.borderWidth      = 2
+  config.matchFgColorHex  = "#f8c291"
 
-  # Ensure TOML config exists
+  # Ensure TOML exists
   let cfgDir  = getHomeDir() / ".config" / "nlauncher"
   let cfgPath = cfgDir / "nlauncher.toml"
   if not fileExists(cfgPath):
@@ -257,10 +228,10 @@ proc initLauncherConfig() =
     writeFile(cfgPath, defaultToml)
     echo "Created default config at ", cfgPath
 
-  # Parse the TOML
+  # Parse TOML
   let tbl = toml.parseFile(cfgPath)
 
-  # ── window section ─────────────────────────────────────────────────────
+  # window
   let w = tbl["window"]
   config.winWidth        = w["width"].getInt(config.winWidth)
   config.maxVisibleItems = w["max_visible_items"].getInt(config.maxVisibleItems)
@@ -269,70 +240,82 @@ proc initLauncherConfig() =
   config.positionY       = w["position_y"].getInt(config.positionY)
   config.verticalAlign   = w["vertical_align"].getStr(config.verticalAlign)
 
-  # ── font section ───────────────────────────────────────────────────────
+  # font
   let f = tbl["font"]
   config.fontName = f["fontname"].getStr(config.fontName)
 
-  # ── input section ──────────────────────────────────────────────────────
+  # input
   let inp = tbl["input"]
   config.prompt = inp["prompt"].getStr(config.prompt)
   config.cursor = inp["cursor"].getStr(config.cursor)
 
-  # ── terminal section ───────────────────────────────────────────────────
+  # terminal
   let term = tbl["terminal"]
   config.terminalExe = term["program"].getStr(config.terminalExe)
 
-  # ── border section ─────────────────────────────────────────────────────
+  # border
   let b = tbl["border"]
   config.borderWidth = b["width"].getInt(config.borderWidth)
 
-  # ── themes array ───────────────────────────────────────────────────────
+  # themes
   themeList = @[]
   for thVal in tbl["themes"].getElems():
     let th = thVal.getTable()
     themeList.add Theme(
-      name:                th["name"].getStr(""),
-      bgColorHex:          th["bgColorHex"].getStr(""),
-      fgColorHex:          th["fgColorHex"].getStr(""),
-      highlightBgColorHex: th["highlightBgColorHex"].getStr(""),
-      highlightFgColorHex: th["highlightFgColorHex"].getStr(""),
-      borderColorHex:      th["borderColorHex"].getStr(""),
-      matchFgColorHex:     th.getOrDefault("matchFgColorHex").getStr("")
+      name:                 th["name"].getStr(""),
+      bgColorHex:           th["bgColorHex"].getStr(""),
+      fgColorHex:           th["fgColorHex"].getStr(""),
+      highlightBgColorHex:  th["highlightBgColorHex"].getStr(""),
+      highlightFgColorHex:  th["highlightFgColorHex"].getStr(""),
+      borderColorHex:       th["borderColorHex"].getStr(""),
+      matchFgColorHex:      th.getOrDefault("matchFgColorHex").getStr("")
     )
 
-  # ── last_chosen ────────────────────────────────────────────────────────
+  # last_chosen (case-insensitive match; fallback to first theme)
   let lastName = tbl["theme"]["last_chosen"].getStr("")
   var pickedIndex = -1
-
-  # Try to find the saved theme in the list (case-insensitive)
   if lastName.len > 0:
     for i, th in themeList:
       if th.name.toLowerAscii == lastName.toLowerAscii:
         pickedIndex = i
         break
-
-  # Fallback to the first theme if not found
   if pickedIndex < 0:
-    if themeList.len > 0:
-      pickedIndex = 0
-    else:
-      quit("nLauncher error: no themes defined in nlauncher.toml")
+    if themeList.len > 0: pickedIndex = 0
+    else: quit("nLauncher error: no themes defined in nlauncher.toml")
 
-  # Apply the chosen theme
   let chosen = themeList[pickedIndex].name
   config.themeName = chosen
   applyTheme(config, chosen)
-
-  # If we fell back, persist the new choice
   if chosen != lastName:
     saveLastTheme(cfgPath)
 
-  # Recompute derived state
+  # derived geometry
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
 
-# ── Fuzzy match helper ─────────────────────────────────────────────────
-# Return positions of q matched as subsequence in t (lowercase), or @[] if no match
+# ── Fuzzy match + helpers ───────────────────────────────────────────────
+proc recentBoost(name: string): int =
+  ## Small score bonus for recently used apps (first is strongest).
+  let idx = recentApps.find(name)
+  if idx >= 0: return max(0, 200 - idx * 40)
+  0
+
+proc takePrefix(input, pfx: string; rest: var string): bool =
+  ## Consume a command prefix and return the remainder (trimmed).
+  let n = pfx.len
+  if input.len >= n and input[0..n-1] == pfx:
+    if input.len == n:
+      rest = ""
+      return true
+    if input.len > n:
+      if input[n] == ' ':
+        rest = input[n+1 .. ^1].strip()
+        return true
+      rest = input[n .. ^1].strip()
+      return true
+  false
+
 proc subseqPositions(q, t: string): seq[int] =
+  ## Case-insensitive subsequence positions of q within t (for highlight).
   if q.len == 0: return @[]
   let lq = q.toLowerAscii
   let lt = t.toLowerAscii
@@ -341,111 +324,110 @@ proc subseqPositions(q, t: string): seq[int] =
     if qi < lq.len and lt[i] == lq[qi]:
       result.add i
       inc qi
-      if qi == lq.len: return
+      if qi == lq.len:
+        return
   result.setLen(0)
 
-proc subseqSpans(q, t: string): seq[(int,int)] =
-  ## Return 1-char spans in t matching q as a subsequence (case-insensitive).
-  let posns = subseqPositions(q, t)
-  for p in posns:
+proc subseqSpans(q, t: string): seq[(int, int)] =
+  ## Convert positions to 1-char spans for highlighting.
+  for p in subseqPositions(q, t):
     result.add (p, 1)
 
 proc isWordBoundary(lt: string; idx: int): bool =
+  ## Basic token boundary check for nicer scoring.
   if idx <= 0: return true
   let c = lt[idx-1]
-  return c == ' ' or c == '-' or c == '_' or c == '.' or c == '/'
+  c == ' ' or c == '-' or c == '_' or c == '.' or c == '/'
 
-# Compute a score for how well t matches q; higher is better. Returns (score, positions)
-proc scoreMatch(q, t: string): (int, seq[int]) =
-  if q.len == 0: return (0, @[])
-  let lq = q.toLowerAscii
-  let lt = t.toLowerAscii
-
-  # Exact substring gets big boost
+proc scoreMatch(q, t, fullPath, home: string): int =
+  ## Heuristic score for matching q against t (higher is better).
+  if q.len == 0: return -1_000_000
+  let lq  = q.toLowerAscii
+  let lt  = t.toLowerAscii
   let pos = lt.find(lq)
+
+  var s = -1_000_000
   if pos >= 0:
-    var s = 1000
-    if pos == 0: s += 200               # prefix bonus
-    if isWordBoundary(lt, pos): s += 80 # word boundary start
-    s += max(0, 60 - (t.len - q.len))   # shorter names a bit higher
-    return (s, toSeq(pos ..< pos + lq.len))
+    s = 1000
+    if pos == 0: s += 200
+    if isWordBoundary(lt, pos): s += 80
+    s += max(0, 60 - (t.len - q.len))
 
-  # Otherwise, subsequence
-  let posns = subseqPositions(q, t)
-  if posns.len == 0: return (-1_000_000, @[])   # not a match
+  if t == q: s += 9000
+  elif t.toLowerAscii == lq: s += 8600
+  elif lt.startsWith(lq): s += 8200
+  elif lt.contains(lq): s += 7800
 
-  var longest = 1
-  var cur = 1
-  var gaps = 0
-  for i in 1 ..< posns.len:
-    if posns[i] == posns[i-1] + 1:
-      inc cur
-      if cur > longest: longest = cur
-    else:
-      gaps += posns[i] - posns[i-1] - 1
-      cur = 1
+  if fullPath.startsWith(home & "/"):
+    if t.toLowerAscii == lq: s += 600
+    elif t.toLowerAscii.startsWith(lq): s += 400
+  s
 
-  var score = longest * 25 - gaps * 3
-
-  for p in posns:
-    if isWordBoundary(lt, p): score += 8
-
-  if posns[0] == 0: score += 25
-  score += max(0, 40 - (t.len - q.len))
-
-  (score, posns)
-
-
+# ── Web shortcuts ───────────────────────────────────────────────────────
 type WebSpec = tuple[prefix, label, base: string, kind: ActionKind]
-
 const webSpecs: array[3, WebSpec] = [
-  (prefix: "/y ", label: "Search YouTube: ", base: "https://www.youtube.com/results?search_query=", kind: akYouTube),
-  (prefix: "/g ", label: "Search Google: ",  base: "https://www.google.com/search?q=",            kind: akGoogle),
-  (prefix: "/w ", label: "Search Wiki: ",    base: "https://en.wikipedia.org/wiki/Special:Search?search=", kind: akWiki)
+  ("/y", "Search YouTube: ", "https://www.youtube.com/results?search_query=", akYouTube),
+  ("/g", "Search Google: ",  "https://www.google.com/search?q=",             akGoogle),
+  ("/w", "Search Wiki: ",    "https://en.wikipedia.org/wiki/Special:Search?search=", akWiki)
 ]
 
-
-# ── Build actions & mirror to filteredApps ─────────────────────────────
 proc visibleQuery(inputText: string): string =
-  ## Strip any trigger prefix (/c, /y, /g, /w, /<cmd>) for highlight purposes.
+  ## Strip known prefixes so UI highlight applies to the user's query.
   if not inputText.startsWith("/"): return inputText
-  if inputText.startsWith("/c "): return inputText[3..^1].strip()
+  var rest: string
+  if takePrefix(inputText, "/c", rest): return rest
   for spec in webSpecs:
-    if inputText.startsWith(spec.prefix):
-      return inputText[spec.prefix.len .. ^1].strip()
+    if takePrefix(inputText, spec.prefix, rest): return rest
   if inputText.len > 1: return inputText[1..^1].strip()
   ""
 
+# ── Build actions & mirror to filteredApps ─────────────────────────────
 proc buildActions() =
+  ## Populate `actions` based on `inputText`; mirror to GUI lists/spans.
   actions.setLen(0)
 
   var handled = false
+  var rest: string
 
-  # Config search
-  if inputText.startsWith("/c "):
-    for a in scanConfigFiles(inputText[3..^1].strip()):
+  # /t — theme preview/apply list (filter by substring)
+  if takePrefix(inputText, "/t", rest):
+    let q = rest.toLowerAscii
+    for th in themeList:
+      if q.len == 0 or th.name.toLowerAscii.contains(q):
+        # List theme names; we’ll apply on Enter in performAction()
+        actions.add Action(kind: akApp, label: th.name, exec: "")
+    handled = true
+
+  # /c — search files under ~/.config
+  if (not handled) and takePrefix(inputText, "/c", rest):
+    for a in scanConfigFiles(rest):
       actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
     handled = true
-  else:
-    # Web specs (/y, /g, /w) handled via small table
+
+  # /y, /g, /w — web searches
+  if not handled:
     for spec in webSpecs:
-      if inputText.startsWith(spec.prefix):
-        let q = inputText[spec.prefix.len .. ^1].strip()
-        actions.add Action(kind: spec.kind, label: spec.label & q,
-                           exec: spec.base & encodeUrl(q))
+      if takePrefix(inputText, spec.prefix, rest):
+        actions.add Action(kind: spec.kind,
+                           label: spec.label & rest,
+                           exec: spec.base & encodeUrl(rest))
         handled = true
         break
 
-  # Direct shell (/ ...)
-  if (not handled) and inputText.startsWith("/") and inputText.len > 1:
+  # "/" — raw run (only if not a known mode)
+  if (not handled) and inputText.startsWith("/") and inputText.len > 1 and
+     not inputText.startsWith("/t") and
+     not inputText.startsWith("/c") and
+     not inputText.startsWith("/y") and
+     not inputText.startsWith("/g") and
+     not inputText.startsWith("/w"):
     let cmd = inputText[1..^1].strip()
     actions.add Action(kind: akRun, label: "Run: " & cmd, exec: cmd)
     handled = true
 
-  # App list (MRU or fuzzy)
+  # Default view — app list (MRU first, then fuzzy)
   if not handled:
     if inputText.len == 0:
-      # MRU first, then the rest (unchanged)
       var seen = initHashSet[string]()
       for name in recentApps:
         for app in allApps:
@@ -457,148 +439,194 @@ proc buildActions() =
         if not seen.contains(app.name):
           actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
     else:
-      # SMART FUZZY: rank by score
       var ranked: seq[(int, Action)] = @[]
       for app in allApps:
-        let (s, _) = scoreMatch(inputText, app.name)
+        let s = scoreMatch(inputText, app.name, app.name, "")
         if s > -1_000_000:
-          ranked.add (s, Action(kind: akApp, label: app.name, exec: app.exec, appData: app))
+          ranked.add (s + recentBoost(app.name),
+                      Action(kind: akApp, label: app.name, exec: app.exec, appData: app))
       ranked.sort(proc(a, b: (int, Action)): int =
-        result = cmp(b[0], a[0])                          # score desc
+        result = cmp(b[0], a[0])
         if result == 0: result = cmpIgnoreCase(a[1].label, b[1].label)
       )
       actions.setLen(0)
       for it in ranked: actions.add it[1]
 
-  # Mirror to filteredApps + compute highlight spans
+  # Mirror to filteredApps + highlight spans
   filteredApps = @[]
   matchSpans   = @[]
 
-  # Derive the visible query (strip trigger prefix for highlighting)
   let q = visibleQuery(inputText)
-
-
   for act in actions:
     filteredApps.add DesktopApp(
       name:    act.label,
       exec:    act.exec,
       hasIcon: (act.kind == akApp and act.appData.hasIcon)
     )
-
     if inputText.len == 0 or q.len == 0:
       matchSpans.add @[]
     else:
       case act.kind
       of akApp, akConfig:
-        # normal list items: fuzzy against the visible query
         matchSpans.add subseqSpans(q, act.label)
-
       of akYouTube, akGoogle, akWiki:
-        # labels like "Search X: " & q — fuzzy only within the query tail
         let off = max(0, act.label.len - q.len)
         let seg = if off < act.label.len: act.label[off .. ^1] else: ""
-        let spansRel = subseqSpans(q, seg)
         var spansAbs: seq[(int,int)] = @[]
-        for (s, l) in spansRel: spansAbs.add (off + s, l)
+        for (s, l) in subseqSpans(q, seg): spansAbs.add (off + s, l)
         matchSpans.add spansAbs
-
       of akRun:
-        # label is "Run: " & q — fuzzy only within the command part
         const prefix = "Run: "
         let off = if act.label.len >= prefix.len: prefix.len else: 0
         let seg = if off < act.label.len: act.label[off .. ^1] else: ""
-        let spansRel = subseqSpans(q, seg)
         var spansAbs: seq[(int,int)] = @[]
-        for (s, l) in spansRel: spansAbs.add (off + s, l)
+        for (s, l) in subseqSpans(q, seg): spansAbs.add (off + s, l)
         matchSpans.add spansAbs
+      else:
+        matchSpans.add @[]
 
   selectedIndex = 0
   viewOffset    = 0
 
 # ── Perform selected action ─────────────────────────────────────────────
 proc performAction(a: Action) =
+  ## Dispatch the chosen entry; `/t` applies theme live without exiting.
+  if inputText.startsWith("/t"):
+    # Apply selected theme by its label and keep the UI open
+    applyThemeAndColors(config, a.label, doNotify = true)
+    saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
+    # Rebuild to refresh highlight/overlay text
+    buildActions()
+    gui.redrawWindow()
+    return
+
   case a.kind
   of akRun:
     runCommand(a.exec)
   of akYouTube, akGoogle, akWiki:
     openUrl(a.exec)
   of akConfig:
-    discard startProcess("/bin/sh", args = ["-c", a.exec], options={poDaemon})
+    discard startProcess("/bin/sh", args = ["-c", a.exec], options = {poDaemon})
   of akApp:
-    discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()], options={poDaemon})
+    discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()],
+                         options = {poDaemon})
     if a.label in recentApps:
       recentApps.delete(recentApps.find(a.label))
     recentApps.insert(a.label, 0)
     if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
     saveRecent()
+ 
   shouldExit = true
-
-# ── Key handling ────────────────────────────────────────────────────────
-proc handleKeyPress(ev: var XEvent) =
-  var buf: array[40, char]
-  var ks: KeySym
-  discard XLookupString(ev.xkey.addr, cast[cstring](buf[0].addr), buf.len.cint, ks.addr, nil)
-  case ks
-  of XK_Escape: shouldExit = true
-  of XK_Return:
-    if selectedIndex in 0..<actions.len: performAction(actions[selectedIndex])
-  of XK_BackSpace:
-    if inputText.len > 0:
-      inputText.setLen(inputText.len - 1)
-      buildActions()
-  of XK_Up:
-    if selectedIndex > 0:
-      dec selectedIndex
-      if selectedIndex < viewOffset: viewOffset = selectedIndex
-  of XK_Down:
-    if selectedIndex < filteredApps.len - 1:
-      inc selectedIndex
-      if selectedIndex >= viewOffset + config.maxVisibleItems:
-        viewOffset = selectedIndex - config.maxVisibleItems + 1
-  of XK_F5: cycleTheme(config)
-  else:
-    if buf[0] != '\0' and buf[0] >= ' ':
-      inputText.add(buf[0])
-      buildActions()
 
 # ── Main loop ───────────────────────────────────────────────────────────
 proc main() =
   benchMode = "--bench" in commandLineParams()
 
-  timeIt "Init Config:"       : initLauncherConfig()
-  timeIt "Load Applications:" : loadApplications()
-  timeIt "Load Recent Apps:"  :  loadRecent()
-  timeIt "Build Actions:"     : buildActions()
+  timeIt "Init Config:":         initLauncherConfig()
+  timeIt "Load Applications:":   loadApplications()
+  timeIt "Load Recent Apps:":    loadRecent()
+  timeIt "Build Actions:":       buildActions()
 
   initGui()
 
-  timeIt "updateParsedColors:"      :  updateParsedColors(config)
-  timeIt "updateGuiColors:"         : gui.updateGuiColors()
-  timeIt "Benchmark(Redraw Frame):" : gui.redrawWindow()
+  timeIt "updateParsedColors:":  updateParsedColors(config)
+  timeIt "updateGuiColors:":     gui.updateGuiColors()
+  timeIt "Benchmark(Redraw Frame):": gui.redrawWindow()
 
-  if benchMode:
-    quit 0
+  if benchMode: quit 0
 
   while not shouldExit:
+    if XPending(display) == 0:
+      sleep(10)
+      continue
+
     var ev: XEvent
     discard XNextEvent(display, ev.addr)
     case ev.theType
     of MapNotify:
-      if ev.xmap.window == window:
-        seenMapNotify = true
+      if ev.xmap.window == window: seenMapNotify = true
     of Expose:
       gui.redrawWindow()
     of KeyPress:
-      handleKeyPress(ev)
+      var buf: array[40, char]
+      var ks: KeySym
+      discard XLookupString(ev.xkey.addr, cast[cstring](buf[0].addr), buf.len.cint,
+                            ks.addr, nil)
+      case ks
+      of XK_Escape:
+        shouldExit = true
+
+      of XK_Return:
+        if selectedIndex in 0..<actions.len:
+          performAction(actions[selectedIndex])
+
+      of XK_BackSpace, XK_Left:
+        ## Backspace: remove last char. Also map Left→Backspace so you can
+        ## quickly “go backwards” to fix a typo without needing Delete.
+        if inputText.len > 0:
+          inputText.setLen(inputText.len - 1)
+          buildActions()
+
+      of XK_Right:
+        ## No-op for now (we don’t support mid-string cursor editing yet).
+        discard
+
+      of XK_Up:
+        if selectedIndex > 0:
+          dec selectedIndex
+          if selectedIndex < viewOffset: viewOffset = selectedIndex
+
+      of XK_Down:
+        if selectedIndex < filteredApps.len - 1:
+          inc selectedIndex
+          if selectedIndex >= viewOffset + config.maxVisibleItems:
+            viewOffset = selectedIndex - config.maxVisibleItems + 1
+
+      of XK_Page_Up:
+        ## Jump up by one page (maxVisibleItems).
+        if filteredApps.len > 0:
+          let step = max(1, config.maxVisibleItems)
+          selectedIndex = max(0, selectedIndex - step)
+          viewOffset    = max(0, viewOffset    - step)
+
+      of XK_Page_Down:
+        ## Jump down by one page (maxVisibleItems).
+        if filteredApps.len > 0:
+          let step = max(1, config.maxVisibleItems)
+          selectedIndex = min(filteredApps.len - 1, selectedIndex + step)
+          let bottom = viewOffset + config.maxVisibleItems - 1
+          if selectedIndex > bottom:
+            viewOffset = min(selectedIndex, filteredApps.len - 1) - (config.maxVisibleItems - 1)
+            if viewOffset < 0: viewOffset = 0
+
+      of XK_Home:
+        ## Go to the first result.
+        if filteredApps.len > 0:
+          selectedIndex = 0
+          viewOffset    = 0
+
+      of XK_End:
+        ## Go to the last result.
+        if filteredApps.len > 0:
+          selectedIndex = filteredApps.len - 1
+          viewOffset    = max(0, filteredApps.len - config.maxVisibleItems)
+
+      of XK_F5:
+        cycleTheme(config)
+
+      else:
+        if buf[0] != '\0' and buf[0] >= ' ':
+          inputText.add(buf[0])
+          buildActions()
+
       if not shouldExit:
         gui.redrawWindow()
+
     of ButtonPress:
       shouldExit = true
     of FocusOut:
-      if seenMapNotify:
-        seenMapNotify = false
-      else:
-        shouldExit = true
+      if seenMapNotify: seenMapNotify = false
+      else: shouldExit = true
     else:
       discard
 

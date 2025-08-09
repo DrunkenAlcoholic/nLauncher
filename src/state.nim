@@ -1,13 +1,12 @@
-# src/state.nim
 ## state.nim — centralised data definitions & global state
 ## MIT; see LICENSE for details.
 ##
-## This module is intentionally logic-free. It defines:
+## Defines:
 ## • App/cache/config structures
 ## • Runtime state variables
-## • Small immutable project-wide constants
+## • Immutable project-wide constants
 ##
-## All fields accessed by other modules are exported with `*`.
+## This module is intentionally logic-free.
 
 import x11/[xlib, x]         ## PDisplay, Window, GC, culong
 
@@ -16,14 +15,14 @@ type
   ## A single launchable application parsed from a `.desktop` file.
   DesktopApp* = object
     name*, exec*: string
-    hasIcon*: bool               ## Whether an icon path exists.
+    hasIcon*: bool
 
   ## Payload cached to `~/.cache/nlauncher/apps.json`.
   CacheData* = object
     usrMtime*, localMtime*: int64
     apps*: seq[DesktopApp]
 
-  ## Launcher configuration populated by `initLauncherConfig`.
+  ## Launcher configuration populated by initLauncherConfig.
   Config* = object
     # Window geometry ----------------------------------------------------
     winWidth*, winMaxHeight*: int
@@ -32,20 +31,20 @@ type
     positionX*, positionY*: int
     verticalAlign*: string        ## "top" | "center" | "one-third"
 
-    # Colours as hex strings (resolved to pixels in `gui.initGui`)
+    # Colours as hex strings (resolved to pixels in gui.initGui) ---------
     bgColorHex*, fgColorHex*: string
     highlightBgColorHex*, highlightFgColorHex*: string
     borderColorHex*: string
     borderWidth*: int
+    matchFgColorHex*: string      ## color for matched letters (e.g. "#FF00FF")
 
     # Prompt / font / theme / terminal ----------------------------------
     prompt*, cursor*: string
     fontName*: string
     themeName*: string
-    terminalExe*: string          ## Preferred terminal program
-    matchFgColorHex*: string     ## color for matched letters (e.g. "#FF00FF")
+    terminalExe*: string          ## preferred terminal program
 
-    # Resolved X pixel colours (set once the X connection is live)
+    # Resolved X pixel colours (set once the X connection is live) -------
     bgColor*, fgColor*, highlightBgColor*, highlightFgColor*, borderColor*: culong
 
 type
@@ -65,7 +64,7 @@ type
     exec*:    string   # what actually gets executed or opened
     appData*: DesktopApp  # optional for akApp; empty for other kinds
 
-type
+  ## Theme definition (matchFgColorHex is explicit; no "auto" support).
   Theme* = object
     name*: string
     bgColorHex*: string
@@ -73,7 +72,7 @@ type
     highlightBgColorHex*: string
     highlightFgColorHex*: string
     borderColorHex*: string
-    matchFgColorHex*: string
+    matchFgColorHex*: string      ## leave empty to inherit Config.matchFgColorHex
 
 # ── X11 handles (set in `gui.initGui`) ──────────────────────────────────
 var
@@ -84,18 +83,18 @@ var
 
 # ── Runtime state ───────────────────────────────────────────────────────
 var
-  config*:        Config            ## Parsed launcher configuration
+  config*:        Config            ## parsed launcher configuration
   allApps*:       seq[DesktopApp]
-  filteredApps*:  seq[DesktopApp]   ## Full list & current view slice
-  inputText*:     string            ## Raw user input
-  selectedIndex*: int               ## Index into `filteredApps`
-  viewOffset*:    int               ## First visible item row
+  filteredApps*:  seq[DesktopApp]   ## full list & current view slice
+  inputText*:     string            ## raw user input
+  selectedIndex*: int               ## index into `filteredApps`
+  viewOffset*:    int               ## first visible item row
   shouldExit*:    bool
   benchMode*:     bool = false      ## `--bench` flag (minimal redraws)
-  recentApps*:    seq[string]       ## Most-recent-first app names
+  recentApps*:    seq[string]       ## most-recent-first app names
   seenMapNotify*: bool = false      ## swallow first FocusOut after map
   themeList*:     seq[Theme]
-  matchSpans*: seq[seq[(int,int)]]   ## per row: list of (start, len) spans to highlight
+  matchSpans*:    seq[seq[(int,int)]]   ## per row: (start,len) spans to highlight
 
 # ── Constants ───────────────────────────────────────────────────────────
 const
@@ -107,27 +106,30 @@ const
   maxRecent* = 10
 
 # ── Defaults as TOML text ───────────────────────────────────────────────
+## NOTE:
+## • No `[files]` section (the /f feature was removed).
+## • No `"auto"` values for matchFgColorHex in themes.
 const defaultToml* = """
 [window]
 width = 500                  # Width of the launcher window
-max_visible_items = 10       # Max viewable items in the application list(dictates the height of the window)
-center = true                # Set to false to use pos+x and pos_y below, set true to use center + vertical align
-position_x = 20              # Vertical position
-position_y = 500             # Horizontal position
-vertical_align = "one-third" # Options "top" "center" "one-third"
+max_visible_items = 10       # Max viewable items in the list (drives height)
+center = true                # If false, use position_x/position_y
+position_x = 20              # Window X when center=false
+position_y = 500             # Window Y when center=false
+vertical_align = "one-third" # "top" | "center" | "one-third"
 
 [font]
-fontname = "Noto Sans:size=12" # Set your font
+fontname = "Noto Sans:size=12"
 
 [input]
-prompt = "> "               # Prompt Character Left side
-cursor = "_"                # Prompt Charater under text
+prompt = "> "
+cursor = "_"
 
 [terminal]
-program = "gnome-terminal"           # Set your terminal for use with "/", has fallback code if nothing is set
+program = "gnome-terminal"
 
 [border]
-width = 2                   # Set outter window border width, set 0 to disable.
+width = 2
 
 # …add or remove more [[themes]] blocks as desired…
 [[themes]]
@@ -137,7 +139,7 @@ fgColorHex             = "#D8DEE9"
 highlightBgColorHex    = "#88C0D0"
 highlightFgColorHex    = "#2E3440"
 borderColorHex         = "#8BE9FD"
-matchFgColorHex        = "#f8c291"  # Optional key to change the matching text highlighted color per theme, default is "#f8c291"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "Ayu Dark"
@@ -146,7 +148,7 @@ fgColorHex             = "#BFBDB6"
 highlightBgColorHex    = "#59C2FF"
 highlightFgColorHex    = "#0F1419"
 borderColorHex         = "#1F2328"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "Ayu Light"
@@ -155,7 +157,7 @@ fgColorHex             = "#5C6773"
 highlightBgColorHex    = "#399EE6"
 highlightFgColorHex    = "#FAFAFA"
 borderColorHex         = "#F0F0F0"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "Catppuccin Frappe"
@@ -164,7 +166,7 @@ fgColorHex             = "#C6D0F5"
 highlightBgColorHex    = "#8CAAEE"
 highlightFgColorHex    = "#303446"
 borderColorHex         = "#414559"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "Catppuccin Latte"
@@ -173,7 +175,7 @@ fgColorHex             = "#4C4F69"
 highlightBgColorHex    = "#1E66F5"
 highlightFgColorHex    = "#EFF1F5"
 borderColorHex         = "#BCC0CC"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "Catppuccin Macchiato"
@@ -182,7 +184,7 @@ fgColorHex             = "#CAD3F5"
 highlightBgColorHex    = "#8AADF4"
 highlightFgColorHex    = "#24273A"
 borderColorHex         = "#363A4F"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "Catppuccin Mocha"
@@ -200,25 +202,25 @@ fgColorHex             = "#FFFFFF"
 highlightBgColorHex    = "#007ACC"
 highlightFgColorHex    = "#002240"
 borderColorHex         = "#003366"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
-name                   = "Charcoal Dark" #https://github.com/mubin6th/charcoal
+name                   = "Charcoal Dark"
 bgColorHex             = "#120F09"
 fgColorHex             = "#C0A179"
 highlightBgColorHex    = "#35291D"
 highlightFgColorHex    = "#D6B891"
 borderColorHex         = "#887254"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
-name                   = "Charcoal Light" #https://github.com/mubin6th/charcoal
+name                   = "Charcoal Light"
 bgColorHex             = "#d6b891"
 fgColorHex             = "#35291d"
 highlightBgColorHex    = "#a28662"
 highlightFgColorHex    = "#120f09"
 borderColorHex         = "#66553f"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "Dracula"
@@ -227,7 +229,7 @@ fgColorHex             = "#F8F8F2"
 highlightBgColorHex    = "#BD93F9"
 highlightFgColorHex    = "#282A36"
 borderColorHex         = "#44475A"
-matchFgColorHex        = "auto"
+matchFgColorHex        = "#f8c291"
 
 [[themes]]
 name                   = "GitHub Dark"

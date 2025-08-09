@@ -1,46 +1,48 @@
-# src/gui.nim
 ## gui.nim — X11 / Xft drawing and window management
 ## MIT; see LICENSE for details.
+##
+## Responsible for:
+## • Creating the X11 window
+## • Loading fonts and allocating colours from Config
+## • Rendering prompt, list rows (with match highlighting), borders, and overlays
 
-# ── Imports ─────────────────────────────────────────────────────────────
 import std/[strutils, times, os]
 import x11/[xlib, xft, x, xrender]
 import ./[state, utils]          # display*, screen*, window*, gc*, config …
 
-# ── Global Xft handles ─────────────────────────────────────────────────────
+# ── Global Xft handles ──────────────────────────────────────────────────
 var
   font*: PXftFont                ## primary UI font (config.fontName)
-  overlayFont*: PXftFont         ## smaller font for theme-name overlay
-  boldFont*: PXftFont
+  overlayFont*: PXftFont         ## smaller font for theme-name/time overlay
+  boldFont*: PXftFont            ## used for matched-character overlays
   xftDraw: PXftDraw
 
   xftColorFg, xftColorHighlightFg: XftColor
   xftColorMatchFg: XftColor
   xftColorBg, xftColorHighlightBg: culong
 
-# ── Overlay timing state ─────────────────────────────────────────────────
+# ── Overlay timing state ────────────────────────────────────────────────
 const
   FadeDurationMs* = 500
-  OverlayFontDelta = 2           ## overlay size = main − 2
+  OverlayFontDelta = 2           ## overlay font is base size − 2pt (min 6pt)
 
 var
   lastThemeSwitchMs*: int64 = 0
   currentThemeName: string = ""
 
-## Return current time in milliseconds since Unix epoch.
 proc nowMs*(): int64 =
+  ## Milliseconds since Unix epoch.
   (epochTime() * 1_000).int64
 
-## Update overlay timing when the active theme changes.
 proc notifyThemeChanged*(name: string) =
+  ## Called by the launcher whenever the active theme changes.
   currentThemeName = name
   lastThemeSwitchMs = nowMs()
 
-# ── Font helpers ─────────────────────────────────────────────────────────
+# ── Font helpers ────────────────────────────────────────────────────────
 proc deriveBoldFont(base: string): string =
-  ## Ensure we request a bold face via fontconfig
+  ## Ensure a bold face request via fontconfig (preserves other attributes).
   if base.contains(":weight="):
-    # replace existing weight
     var s = base
     let i = s.find(":weight=")
     if i >= 0:
@@ -49,7 +51,6 @@ proc deriveBoldFont(base: string): string =
       return s[0 ..< i] & ":weight=bold" & (if j < s.len: s[j .. ^1] else: "")
   result = base & ":weight=bold"
 
-## deriveSmallerFont returns a font string 2pt smaller than base.
 proc deriveSmallerFont(base: string): string =
   ## Derive a slightly smaller variant from *base* by decreasing `:size=`.
   const key = ":size="
@@ -69,21 +70,21 @@ proc deriveSmallerFont(base: string): string =
   result = base & ":size=9"
 
 proc loadFont(display: PDisplay, screen: cint, name: string): PXftFont =
-  ## Wrapper that quits with a helpful message on failure.
+  ## Load a font by pattern; quit with a helpful message on failure.
   let f = XftFontOpenName(display, screen, name)
   if f.isNil:
     quit "Failed to load font: " & name
   f
 
-## Allocate X pixels & Xft colours from current config.
 proc updateGuiColors*() =
+  ## Resolve hex → Xft colours and X pixel values from current config.
   try:
-    allocXftColor(config.fgColorHex, xftColorFg)
-    allocXftColor(config.highlightFgColorHex, xftColorHighlightFg)
-    allocXftColor(config.matchFgColorHex, xftColorMatchFg)
+    allocXftColor(config.fgColorHex,           xftColorFg)
+    allocXftColor(config.highlightFgColorHex,  xftColorHighlightFg)
+    allocXftColor(config.matchFgColorHex,      xftColorMatchFg)
   except CatchableError:
     quit "Invalid colour in theme configuration"
-  xftColorBg         = config.bgColor
+  xftColorBg          = config.bgColor
   xftColorHighlightBg = config.highlightBgColor
 
 proc textWidth(txt: string; useOverlayFont = false): cint =
@@ -91,27 +92,20 @@ proc textWidth(txt: string; useOverlayFont = false): cint =
   var ext: XGlyphInfo
   let pStr  = cast[PFcChar8](txt.cstring)
   let pExt  = cast[PXGlyphInfo](addr ext)
-
   if useOverlayFont:
     XftTextExtentsUtf8(display, overlayFont, pStr, cint(txt.len), pExt)
   else:
     XftTextExtentsUtf8(display, font,        pStr, cint(txt.len), pExt)
+  ext.xOff
 
-  return ext.xOff
-
-#──────────────────────────────────────────────────────────────────────────────
-#  Theme-overlay (name fade-in/out in top-right corner)
-#──────────────────────────────────────────────────────────────────────────────
+# ── Theme overlay (fades in/out at top-right) ───────────────────────────
 proc drawThemeOverlay() =
-  ## Draw the active theme name with a brief fade-out in the top-right corner.
+  ## Draw the active theme name for a short fade after switching.
   if currentThemeName.len == 0: return
   let elapsed = nowMs() - lastThemeSwitchMs
   if elapsed > FadeDurationMs: return
 
-  # Linear alpha (1 → 0)
-  let alpha = 1.0 - (elapsed.float / FadeDurationMs.float)
-
-  # Semi-transparent colour
+  let alpha = 1.0 - (elapsed.float / FadeDurationMs.float) # 1 → 0
   var col: XftColor
   let r = uint16(parseHexInt(config.fgColorHex[1..2])) * 257
   let g = uint16(parseHexInt(config.fgColorHex[3..4])) * 257
@@ -122,7 +116,6 @@ proc drawThemeOverlay() =
   col.color.alpha = uint16(alpha * 65535)
   col.pixel       = config.fgColor
 
-  # Position (top-right, small margin)
   const marginX = 8
   const marginY = 6
   let tx = (config.winWidth - marginX - textWidth(currentThemeName, true)).cint
@@ -137,31 +130,35 @@ proc drawThemeOverlay() =
     currentThemeName.len.cint
   )
 
-# ── Initialization ───────────────────────────────────────────────────────
-## initGui creates the X11 window, loads fonts, sets up colours.
+# ── Initialization ──────────────────────────────────────────────────────
 proc initGui*() =
+  ## Create the X11 window, load fonts, set up colours and drawing targets.
   display = XOpenDisplay(nil)
-  if display.isNil: quit "Cannot open X display"
+  if display.isNil:
+    quit "Cannot open X display"
   screen = XDefaultScreen(display)
 
-  # Fonts ----------------------------------------------------------------
-  font         = loadFont(display, screen, config.fontName)
-  overlayFont  = loadFont(display, screen, deriveSmallerFont(config.fontName))
+  # Fonts
+  font        = loadFont(display, screen, config.fontName)
+  overlayFont = loadFont(display, screen, deriveSmallerFont(config.fontName))
   boldFont    = loadFont(display, screen, deriveBoldFont(config.fontName))
 
-  timeIt "UpdateGuiColors" :
+  timeIt "UpdateGuiColors":
     updateGuiColors()
 
-  timeIt "Create Window" :
+  timeIt "Create Window":
     var winX, winY: cint
     if config.centerWindow:
       let sw = XDisplayWidth(display, screen)
       let sh = XDisplayHeight(display, screen)
       winX = cint((sw - config.winWidth) div 2)
       case config.verticalAlign
-      of "top":      winY = 50
-      of "center":   winY = cint((sh - config.winMaxHeight) div 2)
-      else:          winY = cint(sh div 3)
+      of "top":
+        winY = 50
+      of "center":
+        winY = cint((sh - config.winMaxHeight) div 2)
+      else:
+        winY = cint(sh div 3)  # "one-third"
     else:
       winX = cint(config.positionX)
       winY = cint(config.positionY)
@@ -192,6 +189,7 @@ proc initGui*() =
     )
 
     if isWayland:
+      # Hint to favour a borderless dialog-like surface
       let wmTypeAtom = XInternAtom(display, "_NET_WM_WINDOW_TYPE", 0)
       let dialogAtom = XInternAtom(display, "_NET_WM_WINDOW_TYPE_DIALOG", 0)
       let atomAtom   = XInternAtom(display, "ATOM", 0)
@@ -202,6 +200,7 @@ proc initGui*() =
         cast[Pcuchar](addr dialogAtom), 1.cint
       )
 
+      # _MOTIF_WM_HINTS: disable decorations where respected
       const MWM_HINTS_DECORATIONS = 2'u32
       let mwmHintsAtom = XInternAtom(display, "_MOTIF_WM_HINTS", 0)
       var mwmHints: array[5, uint64]
@@ -243,16 +242,19 @@ proc initGui*() =
       DefaultColormap(display, screen)
     )
 
-# ── Drawing routines ─────────────────────────────────────────────────────
+# ── Drawing routines ────────────────────────────────────────────────────
 proc drawTextHighlighted(txt: string; x, y: cint; spans: seq[(int,int)]; selected=false) =
-  # Row background
+  ## Draw a row with base text plus coloured/bold overlays for *spans*.
   let bgCol = if selected: xftColorHighlightBg else: xftColorBg
   discard XSetForeground(display, gc, bgCol)
-  discard XFillRectangle(display, window, gc,
-                         x, y - font.ascent,
-                         cuint(config.winWidth), cuint(config.lineHeight))
+  discard XFillRectangle(
+    display, window, gc,
+    x, y - font.ascent,
+    cuint(config.winWidth),
+    cuint(config.lineHeight)
+  )
 
-  # 1) Draw full string once in base color (regular font)
+  # Base text
   let baseFg = if selected: xftColorHighlightFg else: xftColorFg
   if txt.len > 0:
     XftDrawStringUtf8(
@@ -264,45 +266,47 @@ proc drawTextHighlighted(txt: string; x, y: cint; spans: seq[(int,int)]; selecte
       txt.len.cint
     )
 
-  # 2) Overlay matched chars with dedicated color + **bold** font
+  # Overlay matched segments (bold + match colour)
   for (s, len) in spans:
     if len <= 0 or s < 0 or s >= txt.len: continue
     let e = min(s + len, txt.len)
+    if e <= s: continue
     let pre = if s > 0: txt[0 ..< s] else: ""
     let seg = txt[s ..< e]
     if seg.len == 0: continue
-
-    let xPos = x + textWidth(pre)          # measure prefix with regular font
+    let xPos = x + textWidth(pre)
     XftDrawStringUtf8(
       xftDraw,
       cast[PXftColor](addr xftColorMatchFg),
-      boldFont,                            # <— bold font here
+      boldFont,
       xPos, y,
       cast[PFcChar8](seg[0].addr),
       seg.len.cint
     )
 
-
-
 proc drawText*(txt: string; x, y: cint; highlight = false) =
+  ## Draw a single line (prompt or simple label) with background fill.
   let fgCol = if highlight: xftColorHighlightFg else: xftColorFg
   let bgCol = if highlight: xftColorHighlightBg else: xftColorBg
-
   discard XSetForeground(display, gc, bgCol)
-  discard XFillRectangle(display, window, gc,
-                         x, y - font.ascent,
-                         cuint(config.winWidth), cuint(config.lineHeight))
-
-  XftDrawStringUtf8(
-    xftDraw,
-    cast[PXftColor](addr fgCol),
-    font,
-    x, y,
-    cast[PFcChar8](txt[0].addr),
-    txt.len.cint
+  discard XFillRectangle(
+    display, window, gc,
+    x, y - font.ascent,
+    cuint(config.winWidth),
+    cuint(config.lineHeight)
   )
+  if txt.len > 0:
+    XftDrawStringUtf8(
+      xftDraw,
+      cast[PXftColor](addr fgCol),
+      font,
+      x, y,
+      cast[PFcChar8](txt[0].addr),
+      txt.len.cint
+    )
 
 proc redrawWindow*() =
+  ## Full-frame redraw (prompt, list, overlay, border).
   discard XSetForeground(display, gc, config.bgColor)
   discard XFillRectangle(
     display, window, gc,
@@ -322,22 +326,29 @@ proc redrawWindow*() =
   let finish  = min(viewOffset + maxRows, total)
 
   for idx in start ..< finish:
-    let app       = filteredApps[idx]
-    let selected  = (idx == selectedIndex)
+    let app      = filteredApps[idx]
+    let selected = (idx == selectedIndex)
     drawTextHighlighted(app.name, 12, y, matchSpans[idx], selected)
     y += config.lineHeight.cint
 
+  # Theme overlay (top-right)
   drawThemeOverlay()
 
+  # Small clock (bottom-right, overlay font)
   let nowStr = now().format("HH:mm")
   let cw = textWidth(nowStr, true)
   let cx = config.winWidth - int(cw) - 2
   let cy = config.winMaxHeight - 8
-  XftDrawStringUtf8(xftDraw, cast[PXftColor](addr xftColorFg), overlayFont,
+  XftDrawStringUtf8(
+    xftDraw,
+    cast[PXftColor](addr xftColorFg),
+    overlayFont,
     cint(cx), cint(cy),
-    cast[PFcChar8](nowStr[0].addr), nowStr.len.cint
+    cast[PFcChar8](nowStr[0].addr),
+    nowStr.len.cint
   )
 
+  # Border
   if config.borderWidth > 0:
     discard XSetForeground(display, gc, config.borderColor)
     for i in 0 ..< config.borderWidth:
