@@ -25,19 +25,24 @@ proc hasHoldFlagLocal(args: seq[string]): bool =
       discard
   false
 
+proc appendShellArgs(argv: var seq[string]; shExe: string; shArgs: seq[string]) =
+  ## Append shell executable and its arguments to `argv`.
+  argv.add shExe
+  for a in shArgs:
+    argv.add a
+
 proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string;
     shArgs: seq[string]): seq[string] =
   ## Normalize command-line to launch a shell inside major terminals.
   var argv = termArgs
   case base
   of "gnome-terminal", "kgx":
-    argv.add "--"; argv.add shExe; for a in shArgs: argv.add a
+    argv.add "--"
   of "wezterm":
-    argv = @["start"] & argv; argv.add shExe; for a in shArgs: argv.add a
-  of "kitty":
-    argv.add "-e"; argv.add shExe; for a in shArgs: argv.add a
+    argv = @["start"] & argv
   else:
-    argv.add "-e"; argv.add shExe; for a in shArgs: argv.add a
+    argv.add "-e"
+  appendShellArgs(argv, shExe, shArgs)
   argv
 
 proc buildShellCommand(cmd, shExe: string; hold = false):
