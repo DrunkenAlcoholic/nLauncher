@@ -3,16 +3,15 @@
 > A lightning-fast, X11-native application and command launcher written in Nim.\
 > Minimal dependencies, zero toolkit bloat, instant fuzzy search, and rich theming.
 
+![nLauncher screenshot](Screenshot.gif)
+
 ---
 
 ## Highlights
 
 | Feature | Notes |
-| ------- | ----- |
-|         |       |
-
-| **Scored fuzzy search**              | Better ranking on prefixes, word starts, and tight matches                                                        |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
+| **Scored fuzzy search**              | Better ranking on prefixes, word starts, and tight matches                                                        |
 | **Per-character match highlighting** | Matching letters are bold & colored (theme-configurable)                                                          |
 | **Live clock**                       | Small HH\:mm clock in the bottom-right                                                                            |
 | **Sub-1 ms startup (bench mode)**    | `--bench` flag for raw launch timing                                                                              |
@@ -136,7 +135,6 @@ Catppuccin Frappe, Latte, Macchiato, Mocha • Ayu Light, Dark • Material Ligh
 One Light, Dark • Monokai • Monokai Pro • GitHub Light • GitHub Dark\
 Cobalt • Palenight • Synthwave 84 • Tokyo Night Light • Tokyo Night • …and more
 
----
 
 ## Future
 
@@ -144,7 +142,6 @@ Cobalt • Palenight • Synthwave 84 • Tokyo Night Light • Tokyo Night • 
 - **Wayland support**: investigate native layer-shell integration (beyond X11).
 - **Plugin hooks**: let external scripts inject custom actions.
 
----
 
 ## License
 
