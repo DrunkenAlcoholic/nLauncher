@@ -386,77 +386,70 @@ const webSpecs: array[3, WebSpec] = [
   ("/w", "Search Wiki: ", "https://en.wikipedia.org/wiki/Special:Search?search=", akWiki)
 ]
 
-proc visibleQuery(inputText: string): string =
-  ## Return the user's query sans command prefix so highlight works.
-  ## Handles: /c, /t, web specs (/y,/g,/w), and generic "/".
-  ## Must stay in sync with buildActions.
+type SlashKind = enum
+  ## Recognised `/`-prefix commands.
+  skNone,        # not a slash command
+  skTheme,       # `/t`
+  skConfig,      # `/c`
+  skWeb,         # `/y`, `/g`, `/w`
+  skRun          # raw `/` command
+
+proc parseSlashCommand(inputText: string): (SlashKind, string, int) =
+  ## Parse *inputText* and return the command kind, remainder, and web spec index.
+  ## The index is `-1` unless `kind` is `skWeb`.
   if not inputText.startsWith("/"):
-    return inputText
+    return (skNone, inputText, -1)
 
   var rest: string
-
-  if takePrefix(inputText, "/c", rest):
-    return rest
   if takePrefix(inputText, "/t", rest):
-    return rest
-
-  for spec in webSpecs:
+    return (skTheme, rest, -1)
+  if takePrefix(inputText, "/c", rest):
+    return (skConfig, rest, -1)
+  for i, spec in webSpecs:
     if takePrefix(inputText, spec.prefix, rest):
-      return rest
+      return (skWeb, rest, i)
 
-  if takePrefix(inputText, "/", rest):
-    return rest
+  discard takePrefix(inputText, "/", rest)
+  (skRun, rest, -1)
 
-  ""
+proc visibleQuery(inputText: string): string =
+  ## Return the user's query sans command prefix so highlight works.
+  let (_, rest, _) = parseSlashCommand(inputText)
+  rest
 
 # ── Build actions & mirror to filteredApps ─────────────────────────────
 proc buildActions() =
   ## Populate `actions` based on `inputText`; mirror to GUI lists/spans.
   actions.setLen(0)
 
-  var handled = false
-  var rest: string
+  let (cmd, rest, webIdx) = parseSlashCommand(inputText)
+  var handled = true
 
-  # /t — theme preview / chooser (stays in-place on Enter)
-  if (not handled) and inputText.startsWith("/t"):
-    rest = inputText[2..^1].strip()
+  case cmd
+  of skTheme:
     let ql = rest.toLowerAscii
     for th in themeList:
       if ql.len == 0 or th.name.toLowerAscii.contains(ql):
         actions.add Action(kind: akTheme, label: th.name, exec: th.name)
-    handled = true
-
-
-  # /c — search files under ~/.config
-  if (not handled) and takePrefix(inputText, "/c", rest):
+  of skConfig:
     for a in scanConfigFiles(rest):
       actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
-    handled = true
-
-  # /y, /g, /w — web searches
-  if not handled:
-    for spec in webSpecs:
-      if takePrefix(inputText, spec.prefix, rest):
-        actions.add Action(kind: spec.kind,
-                           label: spec.label & rest,
-                           exec: spec.base & encodeUrl(rest))
-        handled = true
-        break
-
-  # "/" — raw run (only if not a known mode)
-  if (not handled) and inputText.startsWith("/") and inputText.len > 1 and
-     not inputText.startsWith("/t") and
-     not inputText.startsWith("/c") and
-     not inputText.startsWith("/y") and
-     not inputText.startsWith("/g") and
-     not inputText.startsWith("/w"):
-    let cmd = inputText[1..^1].strip()
-    actions.add Action(kind: akRun, label: "Run: " & cmd, exec: cmd)
-    handled = true
+  of skWeb:
+    let spec = webSpecs[webIdx]
+    actions.add Action(kind: spec.kind,
+                       label: spec.label & rest,
+                       exec: spec.base & encodeUrl(rest))
+  of skRun:
+    if rest.len > 0:
+      actions.add Action(kind: akRun, label: "Run: " & rest, exec: rest)
+    else:
+      handled = false
+  of skNone:
+    handled = false
 
   # Default view — app list (MRU first, then fuzzy)
   if not handled:
-    if inputText.len == 0:
+    if rest.len == 0:
       var seen = initHashSet[string]()
       for name in recentApps:
         for app in allApps:
@@ -470,7 +463,7 @@ proc buildActions() =
     else:
       var ranked: seq[(int, Action)] = @[]
       for app in allApps:
-        let s = scoreMatch(inputText, app.name, app.name, "")
+        let s = scoreMatch(rest, app.name, app.name, "")
         if s > -1_000_000:
           ranked.add (s + recentBoost(app.name),
                       Action(kind: akApp, label: app.name, exec: app.exec, appData: app))
