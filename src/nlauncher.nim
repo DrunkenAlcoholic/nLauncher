@@ -133,32 +133,11 @@ proc applyThemeAndColors*(cfg: var Config; name: string; doNotify = true) =
 
 proc saveLastTheme(cfgPath: string) =
   ## Update or insert [theme].last_chosen = "<name>" in the TOML file.
-  var lines = readFile(cfgPath).splitLines()
-  var inTheme = false
-  var updated = false
-  var themeSectionFound = false
-  for i in 0..<lines.len:
-    let l = lines[i].strip()
-    if l == "[theme]":
-      inTheme = true
-      themeSectionFound = true
-      continue
-    if inTheme:
-      if l.startsWith("[") and l.endsWith("]"):
-        lines.insert("last_chosen = \"" & config.themeName & "\"", i)
-        updated = true
-        break
-      if l.startsWith("last_chosen"):
-        lines[i] = "last_chosen = \"" & config.themeName & "\""
-        updated = true
-        break
-  if not themeSectionFound:
-    lines.add("")
-    lines.add("[theme]")
-    lines.add("last_chosen = \"" & config.themeName & "\"")
-    updated = true
-  if updated:
-    writeFile(cfgPath, lines.join("\n"))
+  var tbl = toml.parseFile(cfgPath)
+  if not tbl.hasKey("theme"):
+    tbl["theme"] = TomlTable()
+  tbl["theme"]["last_chosen"] = toml.toToml(config.themeName)
+  writeFile(cfgPath, toml.pretty(tbl))
 
 proc cycleTheme*(cfg: var Config) =
   ## Cycle to the next theme in `themeList` and persist the choice.
