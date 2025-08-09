@@ -146,13 +146,14 @@ proc localeChain(): seq[string] =
   if base.len > 0:
     var s = base
     let dot = s.find('.'); if dot >= 0: s = s[0 ..< dot]
-    let at = s.find('@'); if at >= 0: s = s[0 ..< at]
+    let at  = s.find('@'); if at  >= 0: s = s[0 ..< at]
     result.add s
     let us = s.find('_')
     if us >= 0:
-      result.add s[0 ..< us] # language only
+      result.add s[0 ..< us]           # language only (e.g. "en")
     elif s.len >= 2:
       result.add s[0 ..< 2]
+  # Always finish with plain English fallback, once.
   if not result.containsIgnoreCase("en"):
     result.add "en"
 

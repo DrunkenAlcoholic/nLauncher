@@ -147,11 +147,17 @@ proc saveLastTheme(cfgPath: string) =
       if l.startsWith("[") and l.endsWith("]"):
         lines.insert("last_chosen = \"" & config.themeName & "\"", i)
         updated = true
+        inTheme = false
         break
       if l.startsWith("last_chosen"):
         lines[i] = "last_chosen = \"" & config.themeName & "\""
         updated = true
+        inTheme = false
         break
+  if inTheme and not updated:
+    # We were in [theme] section at EOF — append the key now.
+    lines.add("last_chosen = \"" & config.themeName & "\"")
+    updated = true
   if not themeSectionFound:
     lines.add("")
     lines.add("[theme]")
@@ -159,6 +165,7 @@ proc saveLastTheme(cfgPath: string) =
     updated = true
   if updated:
     writeFile(cfgPath, lines.join("\n"))
+
 
 proc cycleTheme*(cfg: var Config) =
   ## Cycle to the next theme in `themeList` and persist the choice.
@@ -356,10 +363,57 @@ proc isWordBoundary(lt: string; idx: int): bool =
 
 proc scoreMatch(q, t, fullPath, home: string): int =
   ## Heuristic score for matching q against t (higher is better).
+  ## Now typo-friendly: supports 1 edit (ins/del/sub) or one adjacent transposition.
   if q.len == 0: return -1_000_000
   let lq = q.toLowerAscii
   let lt = t.toLowerAscii
   let pos = lt.find(lq)
+
+  # fast helpers (no alloc)
+  proc withinOneEdit(a, b: string): bool =
+    ## true if a and b are within Levenshtein distance 1 (no transpositions)
+    let m = a.len
+    let n = b.len
+    if abs(m - n) > 1: return false
+    var i = 0
+    var j = 0
+    var edits = 0
+    while i < m and j < n:
+      if a[i] == b[j]:
+        inc i; inc j
+      else:
+        inc edits
+        if edits > 1: return false
+        if m == n: inc i; inc j     # substitution
+        elif m < n: inc j           # insertion in a (skip one in b)
+        else: inc i                 # deletion from a
+    edits += (m - i) + (n - j)
+    edits <= 1
+
+  proc withinOneTransposition(a, b: string): bool =
+    ## true if a == b except for a single adjacent swap (e.g., "firfeox" vs "firefox")
+    if a.len != b.len or a.len < 2: return false
+
+    # Find first mismatch
+    var k = 0
+    while k < a.len and a[k] == b[k]:
+      inc k
+
+    # No mismatch or mismatch at last char → not a single adjacent swap
+    if k >= a.len - 1:
+      return false
+
+    # Require adjacent swap at k/k+1
+    if not (a[k] == b[k+1] and a[k+1] == b[k]):
+      return false
+
+    # Tails after k+1 must match
+    let tailStart = k + 2
+    if tailStart < a.len:
+      return a[tailStart .. ^1] == b[tailStart .. ^1]
+    else:
+      return true
+
 
   var s = -1_000_000
   if pos >= 0:
@@ -369,13 +423,40 @@ proc scoreMatch(q, t, fullPath, home: string): int =
     s += max(0, 60 - (t.len - q.len))
 
   if t == q: s += 9000
-  elif t.toLowerAscii == lq: s += 8600
+  elif lt == lq: s += 8600
   elif lt.startsWith(lq): s += 8200
-  elif lt.contains(lq): s += 7800
+  elif pos >= 0: s += 7800
+  else:
+    # Sliding-window typo tolerance:
+    # Check windows of size |q|-1, |q|, |q|+1 inside lt for <=1 edit or one transposition.
+    var typoHit = false
+    if lq.len >= 2:
+      let sizes = [max(1, lq.len - 1), lq.len, lq.len + 1]
+      for L in sizes:
+        if L > lt.len: continue
+        var start = 0
+        let maxStart = lt.len - L
+        while start <= maxStart:
+          let seg = lt[start ..< start + L]
+          if withinOneEdit(lq, seg) or withinOneTransposition(lq, seg):
+            typoHit = true
+            # score slightly below a real substring; prefer earlier and prefix positions
+            var base = 7700
+            if start == 0: base = 7950     # "prefx" vs "prefix…"
+            s = max(s, base - min(120, start)) # earlier segments rank higher
+            break
+          inc start
+        if typoHit: break
+
+    if not typoHit and lq.len >= 2:
+      # As a last resort, allow single-edit against the full title (helps very short titles)
+      if withinOneEdit(lq, lt) or withinOneTransposition(lq, lt):
+        s = max(s, 7600)
 
   if fullPath.startsWith(home & "/"):
-    if t.toLowerAscii == lq: s += 600
-    elif t.toLowerAscii.startsWith(lq): s += 400
+    if lt == lq: s += 600
+    elif lt.startsWith(lq): s += 400
+
   s
 
 # ── Web shortcuts ───────────────────────────────────────────────────────
@@ -389,10 +470,11 @@ const webSpecs: array[3, WebSpec] = [
 type CmdKind = enum
   ## Recognised input prefixes.
   ckNone,        # no special prefix
-  ckTheme,       # `/t`
+  ckTheme,       # `t:`
   ckConfig,      # `c:`
   ckWeb,         # `y:`, `g:`, `w:`
   ckRun          # raw `/` command
+
 
 proc parseCommand(inputText: string): (CmdKind, string, int) =
   ## Parse *inputText* and return the command kind, remainder, and web spec index.
@@ -401,6 +483,8 @@ proc parseCommand(inputText: string): (CmdKind, string, int) =
 
   if takePrefix(inputText, "c:", rest):
     return (ckConfig, rest, -1)
+  if takePrefix(inputText, "t:", rest):
+    return (ckTheme, rest, -1)
   for i, spec in webSpecs:
     if takePrefix(inputText, spec.prefix, rest):
       return (ckWeb, rest, i)
@@ -408,11 +492,9 @@ proc parseCommand(inputText: string): (CmdKind, string, int) =
   if not inputText.startsWith("/"):
     return (ckNone, inputText, -1)
 
-  if takePrefix(inputText, "/t", rest):
+  if takePrefix(inputText, "/t", rest): # legacy alias
     return (ckTheme, rest, -1)
 
-  discard takePrefix(inputText, "/", rest)
-  (ckRun, rest, -1)
 
 proc visibleQuery(inputText: string): string =
   ## Return the user's query sans command prefix so highlight works.
@@ -452,16 +534,21 @@ proc buildActions() =
   # Default view — app list (MRU first, then fuzzy)
   if not handled:
     if rest.len == 0:
+      var index = initTable[string, DesktopApp](allApps.len * 2)
+      for app in allApps:
+        index[app.name] = app
+
       var seen = initHashSet[string]()
       for name in recentApps:
-        for app in allApps:
-          if app.name == name:
-            actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
-            seen.incl name
-            break
+        if index.hasKey(name):
+          let app = index[name]
+          actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
+          seen.incl name
+
       for app in allApps:
         if not seen.contains(app.name):
           actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
+
     else:
       var top = initHeapQueue[(int, int)]()
       let limit = config.maxVisibleItems
@@ -530,9 +617,11 @@ proc performAction(a: Action) =
   of akApp:
     discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()],
                          options = {poDaemon})
-    if a.label in recentApps:
-      recentApps.delete(recentApps.find(a.label))
+    let ri = recentApps.find(a.label)
+    if ri >= 0:
+      recentApps.delete(ri)
     recentApps.insert(a.label, 0)
+
     if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
     saveRecent()
   of akTheme:
