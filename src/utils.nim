@@ -73,39 +73,44 @@ proc allocXftColor*(hex: string; dest: var XftColor) =
     quit "XftColorAllocValue failed for " & hex
 
 # ── Executable / terminal helpers ───────────────────────────────────────
-## Open a file with the system default handler; fall back to common editors.
-proc openPathWithDefault*(path: string): bool =
-  let abs = absolutePath(path)
-  if not fileExists(abs): return false
-
-  # Preferred system openers
-  for (exe, args) in [(findExe("xdg-open"), @[abs]), (findExe("gio"), @["open", abs])]:
+## Try to start each candidate executable with arguments; return true on success.
+proc tryStart(candidates: seq[(string, seq[string])]): bool =
+  for (exe, args) in candidates:
     if exe.len > 0:
       try:
         discard startProcess(exe, args = args, options = {poDaemon})
         return true
       except:
         discard
+  false
+
+## Open a file with the system default handler; fall back to common editors.
+proc openPathWithDefault*(path: string): bool =
+  let abs = absolutePath(path)
+  if not fileExists(abs): return false
+
+  # Preferred system openers
+  if tryStart(@[(findExe("xdg-open"), @[abs]),
+               (findExe("gio"), @["open", abs])]):
+    return true
 
   # Respect user editor preference
+  var envCandidates: seq[(string, seq[string])] = @[]
   for envName in ["VISUAL", "EDITOR"]:
     let ed = getEnv(envName)
     if ed.len > 0 and findExe(ed).len > 0:
-      try:
-        discard startProcess(ed, args = @[abs], options = {poDaemon})
-        return true
-      except:
-        discard
+      envCandidates.add((ed, @[abs]))
+  if tryStart(envCandidates):
+    return true
 
   # Fallback shortlist
+  var fallbackCandidates: seq[(string, seq[string])] = @[]
   for ed in ["gedit", "kate", "mousepad", "code", "nano", "vi"]:
     let exe = findExe(ed)
     if exe.len > 0:
-      try:
-        discard startProcess(exe, args = @[abs], options = {poDaemon})
-        return true
-      except:
-        discard
+      fallbackCandidates.add((exe, @[abs]))
+  if tryStart(fallbackCandidates):
+    return true
 
   false
 
