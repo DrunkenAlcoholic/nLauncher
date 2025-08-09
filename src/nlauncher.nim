@@ -156,6 +156,7 @@ proc cycleTheme*(cfg: var Config) =
   applyThemeAndColors(cfg, th.name)
   saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
 
+
 # ── Applications discovery (.desktop) ───────────────────────────────────
 proc loadApplications() =
   ## Scan .desktop files with caching to ~/.cache/nlauncher/apps.json.
@@ -372,13 +373,41 @@ const webSpecs: array[3, WebSpec] = [
 ]
 
 proc visibleQuery(inputText: string): string =
-  ## Strip known prefixes so UI highlight applies to the user's query.
-  if not inputText.startsWith("/"): return inputText
-  var rest: string
-  if takePrefix(inputText, "/c", rest): return rest
+  ## Return the user's query sans command prefix so highlight works.
+  ## Handles: /c, /t, web specs (/y,/g,/w), and generic "/".
+  if not inputText.startsWith("/"):
+    return inputText
+
+  let n = inputText.len
+
+  # Fast path for /c and /t
+  if n >= 2:
+    let p2 = inputText[0..1]
+    if p2 == "/c" or p2 == "/t":
+      if n == 2: return ""
+      if inputText[2] == ' ':
+        if n > 3: return inputText[3..^1].strip()
+        else: return ""
+      return inputText[2..^1].strip()
+
+  # Web specs: /y, /g, /w (or any future entries in webSpecs)
   for spec in webSpecs:
-    if takePrefix(inputText, spec.prefix, rest): return rest
-  if inputText.len > 1: return inputText[1..^1].strip()
+    let p = spec.prefix
+    let m = p.len
+    if n >= m and inputText[0..m-1] == p:
+      if n == m: return ""
+      if inputText[m] == ' ':
+        if n > m+1: return inputText[m+1..^1].strip()
+        else: return ""
+      return inputText[m..^1].strip()
+
+  # Generic "/" run
+  if n > 1:
+    if inputText[1] == ' ':
+      if n > 2: return inputText[2..^1].strip()
+      else: return ""
+    return inputText[1..^1].strip()
+
   ""
 
 # ── Build actions & mirror to filteredApps ─────────────────────────────
@@ -389,14 +418,15 @@ proc buildActions() =
   var handled = false
   var rest: string
 
-  # /t — theme preview/apply list (filter by substring)
-  if takePrefix(inputText, "/t", rest):
-    let q = rest.toLowerAscii
+  # /t — theme preview / chooser (stays in-place on Enter)
+  if (not handled) and inputText.startsWith("/t"):
+    rest = inputText[2..^1].strip()
+    let ql = rest.toLowerAscii
     for th in themeList:
-      if q.len == 0 or th.name.toLowerAscii.contains(q):
-        # List theme names; we’ll apply on Enter in performAction()
-        actions.add Action(kind: akApp, label: th.name, exec: "")
+      if ql.len == 0 or th.name.toLowerAscii.contains(ql):
+        actions.add Action(kind: akTheme, label: th.name, exec: th.name)
     handled = true
+
 
   # /c — search files under ~/.config
   if (not handled) and takePrefix(inputText, "/c", rest):
@@ -467,7 +497,7 @@ proc buildActions() =
       matchSpans.add @[]
     else:
       case act.kind
-      of akApp, akConfig:
+      of akApp, akConfig, akTheme:
         matchSpans.add subseqSpans(q, act.label)
       of akYouTube, akGoogle, akWiki:
         let off = max(0, act.label.len - q.len)
@@ -490,16 +520,7 @@ proc buildActions() =
 
 # ── Perform selected action ─────────────────────────────────────────────
 proc performAction(a: Action) =
-  ## Dispatch the chosen entry; `/t` applies theme live without exiting.
-  if inputText.startsWith("/t"):
-    # Apply selected theme by its label and keep the UI open
-    applyThemeAndColors(config, a.label, doNotify = true)
-    saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
-    # Rebuild to refresh highlight/overlay text
-    buildActions()
-    gui.redrawWindow()
-    return
-
+  var exitAfter = true            ## default: exit after action
   case a.kind
   of akRun:
     runCommand(a.exec)
@@ -515,8 +536,15 @@ proc performAction(a: Action) =
     recentApps.insert(a.label, 0)
     if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
     saveRecent()
- 
-  shouldExit = true
+  of akTheme:
+    ## Apply and persist, but DO NOT reset selection or exit.
+    applyThemeAndColors(config, a.exec)   # a.exec carries the theme name
+    saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
+    exitAfter = false
+  # no `else`: all cases covered
+  if exitAfter:
+    shouldExit = true
+
 
 # ── Main loop ───────────────────────────────────────────────────────────
 proc main() =
