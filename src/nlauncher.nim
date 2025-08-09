@@ -461,24 +461,25 @@ proc buildActions() =
         if not seen.contains(app.name):
           actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
     else:
-      var top = initHeapQueue[(int, Action)]()
+      var top = initHeapQueue[(int, int)]()
       let limit = config.maxVisibleItems
-      for app in allApps:
+      for i, app in allApps:
         let s = scoreMatch(rest, app.name, app.name, "")
         if s > -1_000_000:
-          push(top, (s + recentBoost(app.name),
-                     Action(kind: akApp, label: app.name, exec: app.exec, appData: app)))
+          push(top, (s + recentBoost(app.name), i))
           if top.len > limit:
             discard pop(top)
-      var ranked: seq[(int, Action)] = @[]
+      var ranked: seq[(int, int)] = @[]
       while top.len > 0:
         ranked.add pop(top)
-      ranked.sort(proc(a, b: (int, Action)): int =
+      ranked.sort(proc(a, b: (int, int)): int =
         result = cmp(b[0], a[0])
-        if result == 0: result = cmpIgnoreCase(a[1].label, b[1].label)
+        if result == 0: result = cmpIgnoreCase(allApps[a[1]].name, allApps[b[1]].name)
       )
       actions.setLen(0)
-      for it in ranked: actions.add it[1]
+      for it in ranked:
+        let app = allApps[it[1]]
+        actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
 
   # Mirror to filteredApps + highlight spans
   filteredApps = @[]
