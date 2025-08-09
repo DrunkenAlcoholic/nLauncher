@@ -3,7 +3,7 @@
 
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, osproc, strutils, options, tables, sequtils, json, uri, sets,
-    algorithm, times]
+    algorithm, times, heapqueue]
 import parsetoml as toml
 import x11/[xlib, x, xutil, keysym]
 import ./[state, parser, gui, utils]
@@ -464,18 +464,25 @@ proc buildActions() =
         if not seen.contains(app.name):
           actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
     else:
-      var ranked: seq[(int, Action)] = @[]
-      for app in allApps:
+      var top = initHeapQueue[(int, int)]()
+      let limit = config.maxVisibleItems
+      for i, app in allApps:
         let s = scoreMatch(inputText, app.name, app.name, "")
         if s > -1_000_000:
-          ranked.add (s + recentBoost(app.name),
-                      Action(kind: akApp, label: app.name, exec: app.exec, appData: app))
-      ranked.sort(proc(a, b: (int, Action)): int =
+          push(top, (s + recentBoost(app.name), i))
+          if top.len > limit:
+            discard pop(top)
+      var ranked: seq[(int, int)] = @[]
+      while top.len > 0:
+        ranked.add pop(top)
+      ranked.sort(proc(a, b: (int, int)): int =
         result = cmp(b[0], a[0])
-        if result == 0: result = cmpIgnoreCase(a[1].label, b[1].label)
+        if result == 0: result = cmpIgnoreCase(allApps[a[1]].name, allApps[b[1]].name)
       )
       actions.setLen(0)
-      for it in ranked: actions.add it[1]
+      for it in ranked:
+        let app = allApps[it[1]]
+        actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
 
   # Mirror to filteredApps + highlight spans
   filteredApps = @[]
