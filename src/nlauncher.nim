@@ -381,40 +381,42 @@ proc scoreMatch(q, t, fullPath, home: string): int =
 # ── Web shortcuts ───────────────────────────────────────────────────────
 type WebSpec = tuple[prefix, label, base: string; kind: ActionKind]
 const webSpecs: array[3, WebSpec] = [
-  ("/y", "Search YouTube: ", "https://www.youtube.com/results?search_query=", akYouTube),
-  ("/g", "Search Google: ", "https://www.google.com/search?q=", akGoogle),
-  ("/w", "Search Wiki: ", "https://en.wikipedia.org/wiki/Special:Search?search=", akWiki)
+  ("y:", "Search YouTube: ", "https://www.youtube.com/results?search_query=", akYouTube),
+  ("g:", "Search Google: ", "https://www.google.com/search?q=", akGoogle),
+  ("w:", "Search Wiki: ", "https://en.wikipedia.org/wiki/Special:Search?search=", akWiki)
 ]
 
-type SlashKind = enum
-  ## Recognised `/`-prefix commands.
-  skNone,        # not a slash command
-  skTheme,       # `/t`
-  skConfig,      # `/c`
-  skWeb,         # `/y`, `/g`, `/w`
-  skRun          # raw `/` command
+type CmdKind = enum
+  ## Recognised input prefixes.
+  ckNone,        # no special prefix
+  ckTheme,       # `/t`
+  ckConfig,      # `c:`
+  ckWeb,         # `y:`, `g:`, `w:`
+  ckRun          # raw `/` command
 
-proc parseSlashCommand(inputText: string): (SlashKind, string, int) =
+proc parseCommand(inputText: string): (CmdKind, string, int) =
   ## Parse *inputText* and return the command kind, remainder, and web spec index.
-  ## The index is `-1` unless `kind` is `skWeb`.
-  if not inputText.startsWith("/"):
-    return (skNone, inputText, -1)
-
+  ## The index is `-1` unless `kind` is `ckWeb`.
   var rest: string
-  if takePrefix(inputText, "/t", rest):
-    return (skTheme, rest, -1)
-  if takePrefix(inputText, "/c", rest):
-    return (skConfig, rest, -1)
+
+  if takePrefix(inputText, "c:", rest):
+    return (ckConfig, rest, -1)
   for i, spec in webSpecs:
     if takePrefix(inputText, spec.prefix, rest):
-      return (skWeb, rest, i)
+      return (ckWeb, rest, i)
+
+  if not inputText.startsWith("/"):
+    return (ckNone, inputText, -1)
+
+  if takePrefix(inputText, "/t", rest):
+    return (ckTheme, rest, -1)
 
   discard takePrefix(inputText, "/", rest)
-  (skRun, rest, -1)
+  (ckRun, rest, -1)
 
 proc visibleQuery(inputText: string): string =
   ## Return the user's query sans command prefix so highlight works.
-  let (_, rest, _) = parseSlashCommand(inputText)
+  let (_, rest, _) = parseCommand(inputText)
   rest
 
 # ── Build actions & mirror to filteredApps ─────────────────────────────
@@ -422,29 +424,29 @@ proc buildActions() =
   ## Populate `actions` based on `inputText`; mirror to GUI lists/spans.
   actions.setLen(0)
 
-  let (cmd, rest, webIdx) = parseSlashCommand(inputText)
+  let (cmd, rest, webIdx) = parseCommand(inputText)
   var handled = true
 
   case cmd
-  of skTheme:
+  of ckTheme:
     let ql = rest.toLowerAscii
     for th in themeList:
       if ql.len == 0 or th.name.toLowerAscii.contains(ql):
         actions.add Action(kind: akTheme, label: th.name, exec: th.name)
-  of skConfig:
+  of ckConfig:
     for a in scanConfigFiles(rest):
       actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
-  of skWeb:
+  of ckWeb:
     let spec = webSpecs[webIdx]
     actions.add Action(kind: spec.kind,
                        label: spec.label & rest,
                        exec: spec.base & encodeUrl(rest))
-  of skRun:
+  of ckRun:
     if rest.len > 0:
       actions.add Action(kind: akRun, label: "Run: " & rest, exec: rest)
     else:
       handled = false
-  of skNone:
+  of ckNone:
     handled = false
 
   # Default view — app list (MRU first, then fuzzy)
