@@ -8,7 +8,7 @@
 ##
 ## This module is intentionally logic-free.
 
-import x11/[xlib, x]         ## PDisplay, Window, GC, culong
+import x11/[xlib, x] ## PDisplay, Window, GC, culong
 
 # ── Data structures ─────────────────────────────────────────────────────
 type
@@ -29,41 +29,42 @@ type
     lineHeight*, maxVisibleItems*: int
     centerWindow*: bool
     positionX*, positionY*: int
-    verticalAlign*: string        ## "top" | "center" | "one-third"
+    verticalAlign*: string   ## "top" | "center" | "one-third"
 
     # Colours as hex strings (resolved to pixels in gui.initGui) ---------
     bgColorHex*, fgColorHex*: string
     highlightBgColorHex*, highlightFgColorHex*: string
     borderColorHex*: string
     borderWidth*: int
-    matchFgColorHex*: string      ## color for matched letters (e.g. "#FF00FF")
+    matchFgColorHex*: string ## color for matched letters (e.g. "#FF00FF")
 
     # Prompt / font / theme / terminal ----------------------------------
     prompt*, cursor*: string
     fontName*: string
     themeName*: string
-    terminalExe*: string          ## preferred terminal program
+    terminalExe*: string     ## preferred terminal program
 
     # Resolved X pixel colours (set once the X connection is live) -------
-    bgColor*, fgColor*, highlightBgColor*, highlightFgColor*, borderColor*: culong
+    bgColor*, fgColor*, highlightBgColor*, highlightFgColor*,
+      borderColor*: culong
 
 type
   ## What kind of thing the user can pick.
   ActionKind* = enum
-    akApp,        # a real .desktop application
-    akRun,        # a `/…` shell command
-    akConfig,     # `/c` file under ~/.config
-    akYouTube,    # `/y` YouTube search
-    akGoogle,     # `/g` Google search
-    akWiki        # `/w` Wiki search
-    akTheme       # `/t` Theme selector
+    akApp,     # a real .desktop application
+    akRun,     # a `/…` shell command
+    akConfig,  # `/c` file under ~/.config
+    akYouTube, # `/y` YouTube search
+    akGoogle,  # `/g` Google search
+    akWiki,     # `/w` Wiki search
+    akTheme    # `/t` Theme selector
 
   ## A single selectable entry in the launcher.
   Action* = object
-    kind*:    ActionKind
-    label*:   string   # what gets drawn (e.g. "Firefox" or "Run: ls")
-    exec*:    string   # what actually gets executed or opened
-    appData*: DesktopApp  # optional for akApp; empty for other kinds
+    kind*: ActionKind
+    label*: string       # what gets drawn (e.g. "Firefox" or "Run: ls")
+    exec*: string        # what actually gets executed or opened
+    appData*: DesktopApp # optional for akApp; empty for other kinds
 
   ## Theme definition (matchFgColorHex is explicit; no "auto" support).
   Theme* = object
@@ -73,29 +74,29 @@ type
     highlightBgColorHex*: string
     highlightFgColorHex*: string
     borderColorHex*: string
-    matchFgColorHex*: string      ## leave empty to inherit Config.matchFgColorHex
+    matchFgColorHex*: string ## leave empty to inherit Config.matchFgColorHex
 
 # ── X11 handles (set in `gui.initGui`) ──────────────────────────────────
 var
-  display*:  PDisplay
-  window*:   Window
-  gc*:       GC
-  screen*:   cint
+  display*: PDisplay
+  window*: Window
+  gc*: GC
+  screen*: cint
 
 # ── Runtime state ───────────────────────────────────────────────────────
 var
-  config*:        Config            ## parsed launcher configuration
-  allApps*:       seq[DesktopApp]
-  filteredApps*:  seq[DesktopApp]   ## full list & current view slice
-  inputText*:     string            ## raw user input
+  config*: Config                   ## parsed launcher configuration
+  allApps*: seq[DesktopApp]
+  filteredApps*: seq[DesktopApp]    ## full list & current view slice
+  inputText*: string                ## raw user input
   selectedIndex*: int               ## index into `filteredApps`
-  viewOffset*:    int               ## first visible item row
-  shouldExit*:    bool
-  benchMode*:     bool = false      ## `--bench` flag (minimal redraws)
-  recentApps*:    seq[string]       ## most-recent-first app names
+  viewOffset*: int                  ## first visible item row
+  shouldExit*: bool
+  benchMode*: bool = false          ## `--bench` flag (minimal redraws)
+  recentApps*: seq[string]          ## most-recent-first app names
   seenMapNotify*: bool = false      ## swallow first FocusOut after map
-  themeList*:     seq[Theme]
-  matchSpans*:    seq[seq[(int,int)]]   ## per row: (start,len) spans to highlight
+  themeList*: seq[Theme]
+  matchSpans*: seq[seq[(int, int)]] ## per row: (start,len) spans to highlight
 
 # ── Constants ───────────────────────────────────────────────────────────
 const

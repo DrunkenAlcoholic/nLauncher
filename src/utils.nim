@@ -15,7 +15,7 @@ proc shellQuote*(s: string): string =
   result = "'"
   for ch in s:
     if ch == '\'':
-      result.add("'\\''")   # close ' … escape ' … reopen '
+      result.add("'\\''") # close ' … escape ' … reopen '
     else:
       result.add(ch)
   result.add("'")
@@ -47,23 +47,23 @@ proc parseColor*(hex: string): culong =
   if not parseHexRgb(hex, r, g, b):
     return 0
   var c: XColor
-  c.red   = r
+  c.red = r
   c.green = g
-  c.blue  = b
+  c.blue = b
   c.flags = cast[cchar](DoRed or DoGreen or DoBlue)
   if XAllocColor(display, XDefaultColormap(display, screen), c.addr) == 0:
     return 0
   c.pixel
 
 ## Allocate an XftColor for the current display/screen.
-proc allocXftColor*(hex: string, dest: var XftColor) =
+proc allocXftColor*(hex: string; dest: var XftColor) =
   var r, g, b: uint16
   if not parseHexRgb(hex, r, g, b):
     quit "invalid colour: " & hex
   var rc: XRenderColor
-  rc.red   = r
+  rc.red = r
   rc.green = g
-  rc.blue  = b
+  rc.blue = b
   rc.alpha = 65535
   if XftColorAllocValue(
        display,
@@ -125,10 +125,10 @@ proc chooseTerminal*(): string =
   for t in fallbackTerms:
     if whichExists(t):
       return t
-  ""  # headless
+  "" # headless
 
 # ── Timing helper (for --bench mode) ────────────────────────────────────
-template timeIt*(msg: string, body: untyped) =
+template timeIt*(msg: string; body: untyped) =
   let t0 = epochTime()
   body
   if benchMode:

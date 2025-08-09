@@ -2,15 +2,16 @@
 ## MIT; see LICENSE for details.
 
 # ── Imports ─────────────────────────────────────────────────────────────
-import std/[os, osproc, strutils, options, tables, sequtils, json, uri, sets, algorithm, times]
+import std/[os, osproc, strutils, options, tables, sequtils, json, uri, sets,
+    algorithm, times]
 import parsetoml as toml
 import x11/[xlib, x, xutil, keysym]
 import ./[state, parser, gui, utils]
 
 # ── Module-local globals ────────────────────────────────────────────────
 var
-  currentThemeIndex = 0               ## active theme index in `themeList`
-  actions*: seq[Action]               ## transient list for the UI
+  currentThemeIndex = 0 ## active theme index in `themeList`
+  actions*: seq[Action] ## transient list for the UI
 
 # ── Shell / process helpers ─────────────────────────────────────────────
 proc hasHoldFlagLocal(args: seq[string]): bool =
@@ -24,7 +25,8 @@ proc hasHoldFlagLocal(args: seq[string]): bool =
       discard
   false
 
-proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string; shArgs: seq[string]): seq[string] =
+proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string;
+    shArgs: seq[string]): seq[string] =
   ## Normalize command-line to launch a shell inside major terminals.
   var argv = termArgs
   case base
@@ -40,31 +42,31 @@ proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string; shArg
 
 proc runCommand(cmd: string) =
   ## Run `cmd` in the user's terminal; fall back to /bin/sh if none.
-  let bash  = findExe("bash")
+  let bash = findExe("bash")
   let shExe = if bash.len > 0: bash else: "/bin/sh"
 
-  var parts = tokenize(chooseTerminal())   # parser.tokenize
+  var parts = tokenize(chooseTerminal()) # parser.tokenize
   if parts.len == 0:
     let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
-    let shArgs  = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+    let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
     return
 
-  let exe     = parts[0]
+  let exe = parts[0]
   let exePath = findExe(exe)
   if exePath.len == 0:
     let fullCmd = cmd & "; echo; echo '[Press Enter to close]'; read _"
-    let shArgs  = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+    let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
     return
 
   var termArgs = if parts.len > 1: parts[1..^1] else: @[]
-  let base     = exe.extractFilename()
+  let base = exe.extractFilename()
 
-  let hold   = hasHoldFlagLocal(termArgs)
+  let hold = hasHoldFlagLocal(termArgs)
   let fullCmd = if hold: cmd else: cmd & "; echo; echo '[Press Enter to close]'; read _"
-  let shArgs  = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
-  let argv    = buildTerminalArgs(base, termArgs, shExe, shArgs)
+  let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
+  let argv = buildTerminalArgs(base, termArgs, shExe, shArgs)
 
   discard startProcess(exePath, args = argv, options = {poDaemon})
 
@@ -76,7 +78,7 @@ proc openUrl(url: string) =
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return entries from ~/.config matching `query` (case-insensitive).
   let base = getHomeDir() / ".config"
-  let ql   = query.toLowerAscii
+  let ql = query.toLowerAscii
   for path in walkDirRec(base):
     if fileExists(path):
       let fn = path.extractFilename
@@ -92,11 +94,11 @@ proc applyTheme*(cfg: var Config; name: string) =
   ## Set theme fields from `themeList` by name; respect explicit match color.
   for i, th in themeList:
     if th.name.toLowerAscii == name.toLowerAscii:
-      cfg.bgColorHex          = th.bgColorHex
-      cfg.fgColorHex          = th.fgColorHex
+      cfg.bgColorHex = th.bgColorHex
+      cfg.fgColorHex = th.fgColorHex
       cfg.highlightBgColorHex = th.highlightBgColorHex
       cfg.highlightFgColorHex = th.highlightFgColorHex
-      cfg.borderColorHex      = th.borderColorHex
+      cfg.borderColorHex = th.borderColorHex
       if th.matchFgColorHex.len > 0:
         cfg.matchFgColorHex = th.matchFgColorHex
       cfg.themeName = th.name
@@ -105,11 +107,11 @@ proc applyTheme*(cfg: var Config; name: string) =
 
 proc updateParsedColors(cfg: var Config) =
   ## Resolve hex → pixel colours used by Xft/Xlib.
-  cfg.bgColor          = parseColor(cfg.bgColorHex)
-  cfg.fgColor          = parseColor(cfg.fgColorHex)
+  cfg.bgColor = parseColor(cfg.bgColorHex)
+  cfg.fgColor = parseColor(cfg.fgColorHex)
   cfg.highlightBgColor = parseColor(cfg.highlightBgColorHex)
   cfg.highlightFgColor = parseColor(cfg.highlightFgColorHex)
-  cfg.borderColor      = parseColor(cfg.borderColorHex)
+  cfg.borderColor = parseColor(cfg.borderColorHex)
 
 proc applyThemeAndColors*(cfg: var Config; name: string; doNotify = true) =
   ## Apply theme, resolve colors, push to GUI, and optionally redraw.
@@ -160,13 +162,15 @@ proc cycleTheme*(cfg: var Config) =
 # ── Applications discovery (.desktop) ───────────────────────────────────
 proc loadApplications() =
   ## Scan .desktop files with caching to ~/.cache/nlauncher/apps.json.
-  let usrDir    = "/usr/share/applications"
-  let locDir    = getHomeDir() / ".local/share/applications"
-  let cacheDir  = getHomeDir() / ".cache" / "nlauncher"
+  let usrDir = "/usr/share/applications"
+  let locDir = getHomeDir() / ".local/share/applications"
+  let cacheDir = getHomeDir() / ".cache" / "nlauncher"
   let cacheFile = cacheDir / "apps.json"
 
-  let usrM = if dirExists(usrDir): times.toUnix(getLastModificationTime(usrDir)) else: 0'i64
-  let locM = if dirExists(locDir): times.toUnix(getLastModificationTime(locDir)) else: 0'i64
+  let usrM = if dirExists(usrDir): times.toUnix(getLastModificationTime(
+      usrDir)) else: 0'i64
+  let locM = if dirExists(locDir): times.toUnix(getLastModificationTime(
+      locDir)) else: 0'i64
 
   if fileExists(cacheFile):
     try:
@@ -185,8 +189,8 @@ proc loadApplications() =
       if not dirExists(dir): continue
       for path in walkFiles(dir / "*.desktop"):
         let opt = parseDesktopFile(path)
-        if isSome(opt):                         # ← prefix call (or: if opt.isSome()):
-          let app = get(opt)                    # ← prefix call (or: let app = opt.get())
+        if isSome(opt): # ← prefix call (or: if opt.isSome()):
+          let app = get(opt) # ← prefix call (or: let app = opt.get())
           let key = getBaseExec(app.exec)
           if not dedup.hasKey(key) or (app.hasIcon and not dedup[key].hasIcon):
             dedup[key] = app
@@ -197,7 +201,8 @@ proc loadApplications() =
     filteredApps = allApps
     try:
       createDir(cacheDir)
-      writeFile(cacheFile, pretty(%CacheData(usrMtime: usrM, localMtime: locM, apps: allApps)))
+      writeFile(cacheFile, pretty(%CacheData(usrMtime: usrM, localMtime: locM,
+          apps: allApps)))
     except:
       echo "Warning: cache not saved."
 
@@ -207,22 +212,22 @@ proc initLauncherConfig() =
   config = Config() # zero-init
 
   # In-code defaults
-  config.winWidth         = 500
-  config.lineHeight       = 22
-  config.maxVisibleItems  = 10
-  config.centerWindow     = true
-  config.positionX        = 20
-  config.positionY        = 50
-  config.verticalAlign    = "one-third"
-  config.fontName         = "Noto Sans:size=12"
-  config.prompt           = "> "
-  config.cursor           = "_"
-  config.terminalExe      = "gnome-terminal"
-  config.borderWidth      = 2
-  config.matchFgColorHex  = "#f8c291"
+  config.winWidth = 500
+  config.lineHeight = 22
+  config.maxVisibleItems = 10
+  config.centerWindow = true
+  config.positionX = 20
+  config.positionY = 50
+  config.verticalAlign = "one-third"
+  config.fontName = "Noto Sans:size=12"
+  config.prompt = "> "
+  config.cursor = "_"
+  config.terminalExe = "gnome-terminal"
+  config.borderWidth = 2
+  config.matchFgColorHex = "#f8c291"
 
   # Ensure TOML exists
-  let cfgDir  = getHomeDir() / ".config" / "nlauncher"
+  let cfgDir = getHomeDir() / ".config" / "nlauncher"
   let cfgPath = cfgDir / "nlauncher.toml"
   if not fileExists(cfgPath):
     createDir(cfgDir)
@@ -234,12 +239,12 @@ proc initLauncherConfig() =
 
   # window
   let w = tbl["window"]
-  config.winWidth        = w["width"].getInt(config.winWidth)
+  config.winWidth = w["width"].getInt(config.winWidth)
   config.maxVisibleItems = w["max_visible_items"].getInt(config.maxVisibleItems)
-  config.centerWindow    = w["center"].getBool(config.centerWindow)
-  config.positionX       = w["position_x"].getInt(config.positionX)
-  config.positionY       = w["position_y"].getInt(config.positionY)
-  config.verticalAlign   = w["vertical_align"].getStr(config.verticalAlign)
+  config.centerWindow = w["center"].getBool(config.centerWindow)
+  config.positionX = w["position_x"].getInt(config.positionX)
+  config.positionY = w["position_y"].getInt(config.positionY)
+  config.verticalAlign = w["vertical_align"].getStr(config.verticalAlign)
 
   # font
   let f = tbl["font"]
@@ -263,13 +268,13 @@ proc initLauncherConfig() =
   for thVal in tbl["themes"].getElems():
     let th = thVal.getTable()
     themeList.add Theme(
-      name:                 th["name"].getStr(""),
-      bgColorHex:           th["bgColorHex"].getStr(""),
-      fgColorHex:           th["fgColorHex"].getStr(""),
-      highlightBgColorHex:  th["highlightBgColorHex"].getStr(""),
-      highlightFgColorHex:  th["highlightFgColorHex"].getStr(""),
-      borderColorHex:       th["borderColorHex"].getStr(""),
-      matchFgColorHex:      th.getOrDefault("matchFgColorHex").getStr("")
+      name: th["name"].getStr(""),
+      bgColorHex: th["bgColorHex"].getStr(""),
+      fgColorHex: th["fgColorHex"].getStr(""),
+      highlightBgColorHex: th["highlightBgColorHex"].getStr(""),
+      highlightFgColorHex: th["highlightFgColorHex"].getStr(""),
+      borderColorHex: th["borderColorHex"].getStr(""),
+      matchFgColorHex: th.getOrDefault("matchFgColorHex").getStr("")
     )
 
   # last_chosen (case-insensitive match; fallback to first theme)
@@ -343,8 +348,8 @@ proc isWordBoundary(lt: string; idx: int): bool =
 proc scoreMatch(q, t, fullPath, home: string): int =
   ## Heuristic score for matching q against t (higher is better).
   if q.len == 0: return -1_000_000
-  let lq  = q.toLowerAscii
-  let lt  = t.toLowerAscii
+  let lq = q.toLowerAscii
+  let lt = t.toLowerAscii
   let pos = lt.find(lq)
 
   var s = -1_000_000
@@ -365,11 +370,12 @@ proc scoreMatch(q, t, fullPath, home: string): int =
   s
 
 # ── Web shortcuts ───────────────────────────────────────────────────────
-type WebSpec = tuple[prefix, label, base: string, kind: ActionKind]
+type WebSpec = tuple[prefix, label, base: string; kind: ActionKind]
 const webSpecs: array[3, WebSpec] = [
-  ("/y", "Search YouTube: ", "https://www.youtube.com/results?search_query=", akYouTube),
-  ("/g", "Search Google: ",  "https://www.google.com/search?q=",             akGoogle),
-  ("/w", "Search Wiki: ",    "https://en.wikipedia.org/wiki/Special:Search?search=", akWiki)
+  ("/y", "Search YouTube: ", "https://www.youtube.com/results?search_query=",
+      akYouTube),
+  ("/g", "Search Google: ", "https://www.google.com/search?q=", akGoogle),
+  ("/w", "Search Wiki: ", "https://en.wikipedia.org/wiki/Special:Search?search=", akWiki)
 ]
 
 proc visibleQuery(inputText: string): string =
@@ -484,13 +490,13 @@ proc buildActions() =
 
   # Mirror to filteredApps + highlight spans
   filteredApps = @[]
-  matchSpans   = @[]
+  matchSpans = @[]
 
   let q = visibleQuery(inputText)
   for act in actions:
     filteredApps.add DesktopApp(
-      name:    act.label,
-      exec:    act.exec,
+      name: act.label,
+      exec: act.exec,
       hasIcon: (act.kind == akApp and act.appData.hasIcon)
     )
     if inputText.len == 0 or q.len == 0:
@@ -502,23 +508,23 @@ proc buildActions() =
       of akYouTube, akGoogle, akWiki:
         let off = max(0, act.label.len - q.len)
         let seg = if off < act.label.len: act.label[off .. ^1] else: ""
-        var spansAbs: seq[(int,int)] = @[]
+        var spansAbs: seq[(int, int)] = @[]
         for (s, l) in subseqSpans(q, seg): spansAbs.add (off + s, l)
         matchSpans.add spansAbs
       of akRun:
         const prefix = "Run: "
         let off = if act.label.len >= prefix.len: prefix.len else: 0
         let seg = if off < act.label.len: act.label[off .. ^1] else: ""
-        var spansAbs: seq[(int,int)] = @[]
+        var spansAbs: seq[(int, int)] = @[]
         for (s, l) in subseqSpans(q, seg): spansAbs.add (off + s, l)
         matchSpans.add spansAbs
 
   selectedIndex = 0
-  viewOffset    = 0
+  viewOffset = 0
 
 # ── Perform selected action ─────────────────────────────────────────────
 proc performAction(a: Action) =
-  var exitAfter = true            ## default: exit after action
+  var exitAfter = true ## default: exit after action
   case a.kind
   of akRun:
     runCommand(a.exec)
@@ -536,7 +542,7 @@ proc performAction(a: Action) =
     saveRecent()
   of akTheme:
     ## Apply and persist, but DO NOT reset selection or exit.
-    applyThemeAndColors(config, a.exec)   # a.exec carries the theme name
+    applyThemeAndColors(config, a.exec) # a.exec carries the theme name
     saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
     exitAfter = false
   # no `else`: all cases covered
@@ -548,15 +554,15 @@ proc performAction(a: Action) =
 proc main() =
   benchMode = "--bench" in commandLineParams()
 
-  timeIt "Init Config:":         initLauncherConfig()
-  timeIt "Load Applications:":   loadApplications()
-  timeIt "Load Recent Apps:":    loadRecent()
-  timeIt "Build Actions:":       buildActions()
+  timeIt "Init Config:": initLauncherConfig()
+  timeIt "Load Applications:": loadApplications()
+  timeIt "Load Recent Apps:": loadRecent()
+  timeIt "Build Actions:": buildActions()
 
   initGui()
 
-  timeIt "updateParsedColors:":  updateParsedColors(config)
-  timeIt "updateGuiColors:":     gui.updateGuiColors()
+  timeIt "updateParsedColors:": updateParsedColors(config)
+  timeIt "updateGuiColors:": gui.updateGuiColors()
   timeIt "Benchmark(Redraw Frame):": gui.redrawWindow()
 
   if benchMode: quit 0
@@ -613,7 +619,7 @@ proc main() =
         if filteredApps.len > 0:
           let step = max(1, config.maxVisibleItems)
           selectedIndex = max(0, selectedIndex - step)
-          viewOffset    = max(0, viewOffset    - step)
+          viewOffset = max(0, viewOffset - step)
 
       of XK_Page_Down:
         ## Jump down by one page (maxVisibleItems).
@@ -622,20 +628,21 @@ proc main() =
           selectedIndex = min(filteredApps.len - 1, selectedIndex + step)
           let bottom = viewOffset + config.maxVisibleItems - 1
           if selectedIndex > bottom:
-            viewOffset = min(selectedIndex, filteredApps.len - 1) - (config.maxVisibleItems - 1)
+            viewOffset = min(selectedIndex, filteredApps.len - 1) - (
+                config.maxVisibleItems - 1)
             if viewOffset < 0: viewOffset = 0
 
       of XK_Home:
         ## Go to the first result.
         if filteredApps.len > 0:
           selectedIndex = 0
-          viewOffset    = 0
+          viewOffset = 0
 
       of XK_End:
         ## Go to the last result.
         if filteredApps.len > 0:
           selectedIndex = filteredApps.len - 1
-          viewOffset    = max(0, filteredApps.len - config.maxVisibleItems)
+          viewOffset = max(0, filteredApps.len - config.maxVisibleItems)
 
       of XK_F5:
         cycleTheme(config)

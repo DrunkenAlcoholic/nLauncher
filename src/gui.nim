@@ -8,13 +8,13 @@
 
 import std/[strutils, times, os]
 import x11/[xlib, xft, x, xrender]
-import ./[state, utils]          # display*, screen*, window*, gc*, config …
+import ./[state, utils] # display*, screen*, window*, gc*, config …
 
 # ── Global Xft handles ──────────────────────────────────────────────────
 var
-  font*: PXftFont                ## primary UI font (config.fontName)
-  overlayFont*: PXftFont         ## smaller font for theme-name/time overlay
-  boldFont*: PXftFont            ## used for matched-character overlays
+  font*: PXftFont        ## primary UI font (config.fontName)
+  overlayFont*: PXftFont ## smaller font for theme-name/time overlay
+  boldFont*: PXftFont    ## used for matched-character overlays
   xftDraw: PXftDraw
 
   xftColorFg, xftColorHighlightFg: XftColor
@@ -24,7 +24,7 @@ var
 # ── Overlay timing state ────────────────────────────────────────────────
 const
   FadeDurationMs* = 500
-  OverlayFontDelta = 2           ## overlay font is base size − 2pt (min 6pt)
+  OverlayFontDelta = 2 ## overlay font is base size − 2pt (min 6pt)
 
 var
   lastThemeSwitchMs*: int64 = 0
@@ -79,23 +79,23 @@ proc loadFont(display: PDisplay, screen: cint, name: string): PXftFont =
 proc updateGuiColors*() =
   ## Resolve hex → Xft colours and X pixel values from current config.
   try:
-    allocXftColor(config.fgColorHex,           xftColorFg)
-    allocXftColor(config.highlightFgColorHex,  xftColorHighlightFg)
-    allocXftColor(config.matchFgColorHex,      xftColorMatchFg)
+    allocXftColor(config.fgColorHex, xftColorFg)
+    allocXftColor(config.highlightFgColorHex, xftColorHighlightFg)
+    allocXftColor(config.matchFgColorHex, xftColorMatchFg)
   except CatchableError:
     quit "Invalid colour in theme configuration"
-  xftColorBg          = config.bgColor
+  xftColorBg = config.bgColor
   xftColorHighlightBg = config.highlightBgColor
 
 proc textWidth(txt: string; useOverlayFont = false): cint =
   ## Return pixel width of *txt* using the primary or overlay font.
   var ext: XGlyphInfo
-  let pStr  = cast[PFcChar8](txt.cstring)
-  let pExt  = cast[PXGlyphInfo](addr ext)
+  let pStr = cast[PFcChar8](txt.cstring)
+  let pExt = cast[PXGlyphInfo](addr ext)
   if useOverlayFont:
     XftTextExtentsUtf8(display, overlayFont, pStr, cint(txt.len), pExt)
   else:
-    XftTextExtentsUtf8(display, font,        pStr, cint(txt.len), pExt)
+    XftTextExtentsUtf8(display, font, pStr, cint(txt.len), pExt)
   ext.xOff
 
 # ── Theme overlay (fades in/out at top-right) ───────────────────────────
@@ -110,11 +110,11 @@ proc drawThemeOverlay() =
   let r = uint16(parseHexInt(config.fgColorHex[1..2])) * 257
   let g = uint16(parseHexInt(config.fgColorHex[3..4])) * 257
   let b = uint16(parseHexInt(config.fgColorHex[5..6])) * 257
-  col.color.red   = r
+  col.color.red = r
   col.color.green = g
-  col.color.blue  = b
+  col.color.blue = b
   col.color.alpha = uint16(alpha * 65535)
-  col.pixel       = config.fgColor
+  col.pixel = config.fgColor
 
   const marginX = 8
   const marginY = 6
@@ -139,9 +139,9 @@ proc initGui*() =
   screen = XDefaultScreen(display)
 
   # Fonts
-  font        = loadFont(display, screen, config.fontName)
+  font = loadFont(display, screen, config.fontName)
   overlayFont = loadFont(display, screen, deriveSmallerFont(config.fontName))
-  boldFont    = loadFont(display, screen, deriveBoldFont(config.fontName))
+  boldFont = loadFont(display, screen, deriveBoldFont(config.fontName))
 
   timeIt "UpdateGuiColors":
     updateGuiColors()
@@ -158,7 +158,7 @@ proc initGui*() =
       of "center":
         winY = cint((sh - config.winMaxHeight) div 2)
       else:
-        winY = cint(sh div 3)  # "one-third"
+        winY = cint(sh div 3) # "one-third"
     else:
       winX = cint(config.positionX)
       winY = cint(config.positionY)
@@ -166,8 +166,8 @@ proc initGui*() =
     var attrs: XSetWindowAttributes
     let isWayland = getEnv("WAYLAND_DISPLAY") != ""
     attrs.override_redirect = if isWayland: 0 else: 1
-    attrs.background_pixel  = config.bgColor
-    attrs.border_pixel      = config.borderColor
+    attrs.background_pixel = config.bgColor
+    attrs.border_pixel = config.borderColor
 
     let valueMask = culong(
       CWBackPixel or CWBorderPixel or
@@ -192,7 +192,7 @@ proc initGui*() =
       # Hint to favour a borderless dialog-like surface
       let wmTypeAtom = XInternAtom(display, "_NET_WM_WINDOW_TYPE", 0)
       let dialogAtom = XInternAtom(display, "_NET_WM_WINDOW_TYPE_DIALOG", 0)
-      let atomAtom   = XInternAtom(display, "ATOM", 0)
+      let atomAtom = XInternAtom(display, "ATOM", 0)
       discard XChangeProperty(
         display, window,
         wmTypeAtom, atomAtom,
@@ -235,7 +235,7 @@ proc initGui*() =
     if not isWayland:
       discard XSetInputFocus(display, window, RevertToParent, CurrentTime)
 
-    gc      = XCreateGC(display, window, 0, nil)
+    gc = XCreateGC(display, window, 0, nil)
     xftDraw = XftDrawCreate(
       display, window,
       DefaultVisual(display, screen),
@@ -243,7 +243,8 @@ proc initGui*() =
     )
 
 # ── Drawing routines ────────────────────────────────────────────────────
-proc drawTextHighlighted(txt: string; x, y: cint; spans: seq[(int,int)]; selected=false) =
+proc drawTextHighlighted(txt: string; x, y: cint; spans: seq[(int, int)];
+    selected = false) =
   ## Draw a row with base text plus coloured/bold overlays for *spans*.
   let bgCol = if selected: xftColorHighlightBg else: xftColorBg
   discard XSetForeground(display, gc, bgCol)
@@ -316,17 +317,18 @@ proc redrawWindow*() =
   )
 
   var y: cint = font.ascent + 8
-  let promptLine = config.prompt & inputText & (if benchMode: "" else: config.cursor)
+  let promptLine = config.prompt & inputText & (
+      if benchMode: "" else: config.cursor)
   drawText(promptLine, 12, y)
   y += config.lineHeight.cint + 6
 
-  let total   = filteredApps.len
+  let total = filteredApps.len
   let maxRows = config.maxVisibleItems
-  let start   = viewOffset
-  let finish  = min(viewOffset + maxRows, total)
+  let start = viewOffset
+  let finish = min(viewOffset + maxRows, total)
 
   for idx in start ..< finish:
-    let app      = filteredApps[idx]
+    let app = filteredApps[idx]
     let selected = (idx == selectedIndex)
     drawTextHighlighted(app.name, 12, y, matchSpans[idx], selected)
     y += config.lineHeight.cint
@@ -355,7 +357,7 @@ proc redrawWindow*() =
       discard XDrawRectangle(
         display, window, gc,
         i.cint, i.cint,
-        cuint(config.winWidth  - 1 - i * 2),
+        cuint(config.winWidth - 1 - i * 2),
         cuint(config.winMaxHeight - 1 - i * 2)
       )
 

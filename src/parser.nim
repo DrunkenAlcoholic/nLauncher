@@ -14,7 +14,7 @@
 ##   - Locale resolution follows .desktop rules: key[lang_COUNTRY] → key[lang] → any variant.
 
 import std/[os, strutils, streams, tables, options]
-import state  # DesktopApp
+import state # DesktopApp
 
 # ── Internal helpers ────────────────────────────────────────────────────
 
@@ -27,10 +27,10 @@ proc stripFieldCodes(s: string): string =
     if s[i] == '%' and i+1 < s.len:
       let n = s[i+1]
       if n == '%':
-        result.add('%'); inc i, 2          # '%%' → '%'
+        result.add('%'); inc i, 2 # '%%' → '%'
         continue
       if n.isAlphaAscii:
-        inc i, 2                           # drop %X
+        inc i, 2 # drop %X
         continue
     result.add s[i]
     inc i
@@ -146,11 +146,11 @@ proc localeChain(): seq[string] =
   if base.len > 0:
     var s = base
     let dot = s.find('.'); if dot >= 0: s = s[0 ..< dot]
-    let at  = s.find('@'); if at  >= 0: s = s[0 ..< at]
+    let at = s.find('@'); if at >= 0: s = s[0 ..< at]
     result.add s
     let us = s.find('_')
     if us >= 0:
-      result.add s[0 ..< us]         # language only
+      result.add s[0 ..< us] # language only
     elif s.len >= 2:
       result.add s[0 ..< 2]
   if not result.containsIgnoreCase("en"):
@@ -200,11 +200,11 @@ proc parseDesktopFile*(path: string): Option[DesktopApp] =
       if parts.len == 2:
         kv[parts[0].strip()] = parts[1].strip()
 
-  let name        = getBestValue(kv, "Name")
-  let exec        = getBestValue(kv, "Exec")
-  let categories  = kv.getOrDefault("Categories", "")
-  let icon        = kv.getOrDefault("Icon", "")
-  let noDisplay   = kv.getOrDefault("NoDisplay", "false").toLowerAscii() == "true"
+  let name = getBestValue(kv, "Name")
+  let exec = getBestValue(kv, "Exec")
+  let categories = kv.getOrDefault("Categories", "")
+  let icon = kv.getOrDefault("Icon", "")
+  let noDisplay = kv.getOrDefault("NoDisplay", "false").toLowerAscii() == "true"
   let terminalApp = kv.getOrDefault("Terminal", "false").toLowerAscii() == "true"
 
   # Category filter: exclude Settings/System (exact tokens, case-insensitive)
