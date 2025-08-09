@@ -512,8 +512,6 @@ proc buildActions() =
         var spansAbs: seq[(int,int)] = @[]
         for (s, l) in subseqSpans(q, seg): spansAbs.add (off + s, l)
         matchSpans.add spansAbs
-      else:
-        matchSpans.add @[]
 
   selectedIndex = 0
   viewOffset    = 0
