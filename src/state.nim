@@ -53,10 +53,10 @@ type
   ActionKind* = enum
     akApp,     # a real .desktop application
     akRun,     # a `/…` shell command
-    akConfig,  # `/c` file under ~/.config
-    akYouTube, # `/y` YouTube search
-    akGoogle,  # `/g` Google search
-    akWiki,     # `/w` Wiki search
+    akConfig,  # `c:` file under ~/.config
+    akYouTube, # `y:` YouTube search
+    akGoogle,  # `g:` Google search
+    akWiki,     # `w:` Wiki search
     akTheme    # `/t` Theme selector
 
   ## A single selectable entry in the launcher.

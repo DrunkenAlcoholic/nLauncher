@@ -20,7 +20,7 @@
 | **Live theme cycling & persistence** | Press F5 to cycle themes; saves your last choice in the TOML config                                               |
 | **Theme preview mode**               | `/t` shows a lightweight preview list of available themes                                                         |
 | **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nlauncher.toml`                                  |
-| **Slash triggers**                   | `/ …` run shell command • `/c …` open dotfile • `/y …` YouTube • `/g …` Google • `/w …` Wiki • `/t` Theme preview |
+| **Prefix triggers**                   | `/ …` run shell command • `c: …` open dotfile • `y: …` YouTube • `g: …` Google • `w: …` Wiki • `/t` Theme preview |
 | **Zero toolkit**                     | Pure Xlib + Xft + [parsetoml](https://github.com/pragmagic/parsetoml)                                             |
 
 ---
@@ -63,10 +63,10 @@ nimble release   # produces ./bin/nlauncher
 | --------------------- | ---------------------------------------------------------------------- |
 | *Type letters*        | Instant fuzzy filter (typo-tolerant)                                   |
 | `/ …`                 | Run shell command (everything after the slash is passed to your shell) |
-| `/c …`                | Search `~/.config` for dotfiles and open in your editor                |
-| `/y …`                | Search YouTube in browser                                              |
-| `/g …`                | Google search in browser                                               |
-| `/w …`                | Wikipedia search in browser                                            |
+| `c: …`                | Search `~/.config` for dotfiles and open in your editor                |
+| `y: …`                | Search YouTube in browser                                              |
+| `g: …`                | Google search in browser                                               |
+| `w: …`                | Wikipedia search in browser                                            |
 | `/t`                  | Preview available themes in a quick selection list                     |
 | **Enter**             | Launch item / run command                                              |
 | **Esc**               | Quit                                                                   |
