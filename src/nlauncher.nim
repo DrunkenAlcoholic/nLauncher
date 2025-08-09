@@ -387,9 +387,9 @@ const webSpecs: array[3, WebSpec] = [
 ]
 
 type SlashKind = enum
-  ## Recognised `/`-prefix commands.
-  skNone,        # not a slash command
-  skTheme,       # `/t`
+  ## Recognised command prefixes.
+  skNone,        # not a command prefix
+  skTheme,       # `t:`
   skConfig,      # `/c`
   skWeb,         # `/y`, `/g`, `/w`
   skRun          # raw `/` command
@@ -397,12 +397,14 @@ type SlashKind = enum
 proc parseSlashCommand(inputText: string): (SlashKind, string, int) =
   ## Parse *inputText* and return the command kind, remainder, and web spec index.
   ## The index is `-1` unless `kind` is `skWeb`.
+  var rest: string
+
+  if takePrefix(inputText, "t:", rest):
+    return (skTheme, rest, -1)
+
   if not inputText.startsWith("/"):
     return (skNone, inputText, -1)
 
-  var rest: string
-  if takePrefix(inputText, "/t", rest):
-    return (skTheme, rest, -1)
   if takePrefix(inputText, "/c", rest):
     return (skConfig, rest, -1)
   for i, spec in webSpecs:

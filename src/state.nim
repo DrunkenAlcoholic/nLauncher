@@ -57,7 +57,7 @@ type
     akYouTube, # `/y` YouTube search
     akGoogle,  # `/g` Google search
     akWiki,     # `/w` Wiki search
-    akTheme    # `/t` Theme selector
+    akTheme    # `t:` Theme selector
 
   ## A single selectable entry in the launcher.
   Action* = object
@@ -143,7 +143,7 @@ width = 2                         # Border thickness in pixels (0 = no border)
 # Themes
 # ==========================
 # Add or remove [[themes]] blocks to customize appearance.
-# The "name" field is what you'll see in the theme selector (/t or F5).
+# The "name" field is what you'll see in the theme selector (t: or F5).
 # Colors:
 #   bgColorHex          = Window background
 #   fgColorHex          = Normal text color
@@ -152,7 +152,7 @@ width = 2                         # Border thickness in pixels (0 = no border)
 #   borderColorHex      = Window border color
 #   matchFgColorHex     = Color for matching characters in search results
 #
-# Tip: You can quickly preview themes in-app with the `/t` command.
+# Tip: You can quickly preview themes in-app with the `t:` command.
 
 [[themes]]
 name                = "Arstotzka"   
