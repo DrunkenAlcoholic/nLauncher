@@ -3,25 +3,29 @@
 > A lightning-fast, X11-native application and command launcher written in Nim.\
 > Minimal dependencies, zero toolkit bloat, instant fuzzy search, and rich theming.
 
-![nLauncher screenshot](Screenshot.gif)
+
 
 ---
 
 ## Highlights
 
 | Feature | Notes |
-| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------- |
-| **Scored fuzzy search**              | Better ranking on prefixes, word starts, and tight matches                                                        |
-| **Per-character match highlighting** | Matching letters are bold & colored (theme-configurable)                                                          |
-| **Live clock**                       | Small HH\:mm clock in the bottom-right                                                                            |
-| **Sub-1 ms startup (bench mode)**    | `--bench` flag for raw launch timing                                                                              |
-| **Recent-apps history**              | Empty query shows your last launches first                                                                        |
-| **100% keyboard-driven**             | Arrow keys / PageUp / PageDown / Home / End / Left / Right / Enter / Esc                                          |
-| **Live theme cycling & persistence** | Press F5 to cycle themes; saves your last choice in the TOML config                                               |
-| **Theme preview mode**               | `t:` shows a lightweight preview list of available themes                                                         |
-| **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nlauncher.toml`                                  |
-| **Prefix triggers**                   | `/ …` run shell command • `c: …` open dotfile • `y: …` YouTube • `g: …` Google • `w: …` Wiki • `t:` Theme preview |
-| **Zero toolkit**                     | Pure Xlib + Xft + [parsetoml](https://github.com/pragmagic/parsetoml)                                             |
+| ------- | ----- |
+|         |       |
+
+| **Scored fuzzy search**              | Better ranking on prefixes, word starts, and tight matches                                                                           |
+| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| **Per-character match highlighting** | Matching letters are bold & colored (theme-configurable)                                                                             |
+| **Live clock**                       | Small HH\:mm clock in the bottom-right                                                                                               |
+| **Sub-1 ms startup (bench mode)**    | `--bench` flag for raw launch timing                                                                                                 |
+| **Recent-apps history**              | Empty query shows your last launches first                                                                                           |
+| **100% keyboard-driven**             | Arrow keys / PageUp / PageDown / Home / End / Left / Right / Enter / Esc                                                             |
+| **Live theme cycling & persistence** | Press F5 to cycle themes; saves your last choice in the TOML config                                                                  |
+| **Theme preview mode**               | `t:` shows a lightweight preview list of available themes                                                                            |
+| **Fast file search**                 | `s:` searches filesystem using `fd` (or `locate` fallback), typo-tolerant and ranked with match highlighting                         |
+| **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nlauncher.toml`                                                     |
+| **Prefix triggers**                  | `/ …` run shell command • `c: …` open dotfile • `y: …` YouTube • `g: …` Google • `w: …` Wiki • `t:` Theme preview • `s:` File search |
+| **Zero toolkit**                     | Pure Xlib + Xft + [parsetoml](https://github.com/pragmagic/parsetoml)                                                                |
 
 ---
 
@@ -68,6 +72,7 @@ nimble release   # produces ./bin/nlauncher
 | `g: …`                | Google search in browser                                               |
 | `w: …`                | Wikipedia search in browser                                            |
 | `t:`                  | Preview available themes in a quick selection list                     |
+| `s:`                  | Search filesystem for files and open with default application          |
 | **Enter**             | Launch item / run command                                              |
 | **Esc**               | Quit                                                                   |
 | **↑ / ↓**             | Navigate list                                                          |
@@ -135,13 +140,14 @@ Catppuccin Frappe, Latte, Macchiato, Mocha • Ayu Light, Dark • Material Ligh
 One Light, Dark • Monokai • Monokai Pro • GitHub Light • GitHub Dark\
 Cobalt • Palenight • Synthwave 84 • Tokyo Night Light • Tokyo Night • …and more
 
+---
 
 ## Future
 
 - **Icons & comments**: display app icons and `.comment` text alongside names.
 - **Wayland support**: investigate native layer-shell integration (beyond X11).
-- **Plugin hooks**: let external scripts inject custom actions.
 
+---
 
 ## License
 

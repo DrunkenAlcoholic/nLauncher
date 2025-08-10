@@ -30,6 +30,8 @@ const
 var
   lastThemeSwitchMs*: int64 = 0
   currentThemeName: string = ""
+  statusText*: string = ""
+  statusUntilMs*: int64 = 0
 
 proc nowMs*(): int64 =
   ## Milliseconds since Unix epoch.
@@ -41,6 +43,15 @@ proc notifyThemeChanged*(name: string) =
   lastThemeSwitchMs = nowMs()
   overlayColor = xftColorFg
   overlayColor.color.alpha = 65535'u16
+
+proc notifyStatus*(text: string; durationMs = 800) =
+  ## Show a short-lived status overlay (e.g., "Searching…").
+  statusText = text
+  statusUntilMs = nowMs() + durationMs
+
+proc clearStatus*() =
+  statusText = ""
+  statusUntilMs = 0
 
 # ── Font helpers ────────────────────────────────────────────────────────
 proc deriveBoldFont(base: string): string =
@@ -125,6 +136,34 @@ proc drawThemeOverlay() =
     cast[PFcChar8](currentThemeName[0].addr),
     currentThemeName.len.cint
   )
+
+proc drawStatusOverlay() =
+  ## Draw transient status text near the top-right, below theme overlay if present.
+  if statusText.len == 0: return
+  if nowMs() > statusUntilMs: return
+
+  const marginX = 8
+  const marginY = 6
+
+  # Start at top-right
+  var ty = (marginY + overlayFont.ascent).cint
+
+  # If theme name is currently fading, nudge status below it
+  let themeActive = (currentThemeName.len > 0) and ((nowMs() - lastThemeSwitchMs) <= FadeDurationMs)
+  if themeActive:
+    ty += (overlayFont.ascent + 4).cint
+
+  let tx = (config.winWidth - marginX - textWidth(statusText, true)).cint
+
+  XftDrawStringUtf8(
+    xftDraw,
+    cast[PXftColor](addr xftColorFg),
+    overlayFont,
+    tx, ty,
+    cast[PFcChar8](statusText[0].addr),
+    statusText.len.cint
+  )
+
 
 # ── Initialization ──────────────────────────────────────────────────────
 proc initGui*() =
@@ -310,6 +349,7 @@ proc redrawWindow*() =
 
   # Theme overlay (top-right)
   drawThemeOverlay()
+  drawStatusOverlay()
 
   # Small clock (bottom-right, overlay font)
   let nowStr = now().format("HH:mm")

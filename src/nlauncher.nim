@@ -1,9 +1,9 @@
-## nLauncher.nim — main program (lean: no /f file search)
+## nLauncher.nim — main program
 ## MIT; see LICENSE for details.
 
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, osproc, strutils, options, tables, sequtils, json, uri, sets,
-    algorithm, times, heapqueue]
+    algorithm, times, heapqueue, streams]
 import parsetoml as toml
 import x11/[xlib, x, xutil, keysym]
 import ./[state, parser, gui, utils]
@@ -84,6 +84,72 @@ proc openUrl(url: string) =
   discard startProcess("/usr/bin/env", args = @["xdg-open", url], options = {poDaemon})
 
 # ── Small searches: ~/.config helper ────────────────────────────────────
+proc shortenPath(p: string; maxLen = 80): string =
+  ## Replace $HOME with ~, and ellipsize the middle if too long.
+  var s = p
+  let home = getHomeDir()
+  if s.startsWith(home & "/"):
+    s = "~" & s[home.len .. ^1]
+  if s.len <= maxLen: return s
+  # keep start and end, ellipsize the middle
+  let keep = maxLen div 2 - 2
+  if keep <= 0: return s
+  result = s[0 ..< keep] & "…" & s[s.len - keep .. ^1]
+
+proc scanFilesFast*(query: string; limit = 400): seq[string] =
+  ## Return absolute file paths matching `query` quickly.
+  ## Priority: fd → locate → fallback walk (~/.config and ~).
+  if query.len == 0: return @[]
+
+  let home = getHomeDir()
+  let q = query
+
+  # 1) fd (fastest). We want absolute paths, case-insensitive, files only.
+  let fdExe = findExe("fd")
+  if fdExe.len > 0:
+    try:
+      #let args = @["-i", "--type", "f", "--absolute-path", "--max-results", $limit, q, home]
+      # Add hidden files "-H" 
+      let args = @["-i", "-H", "--type", "f", "--absolute-path", "--max-results", $limit, q, home]
+      let p = startProcess(fdExe, args = args, options = {poUsePath, poStdErrToStdOut})
+      defer: osproc.close(p)
+      let buf = p.outputStream.readAll()
+      for line in buf.splitLines():
+        let path = line.strip()
+        if path.len > 0 and fileExists(path):
+          result.add path
+      return
+    except:
+      discard
+
+  # 2) locate (very fast if db is present)
+  let locExe = findExe("locate")
+  if locExe.len > 0:
+    try:
+      let p = startProcess(locExe, args = @[q], options = {poUsePath, poStdErrToStdOut})
+      defer: osproc.close(p)
+      var count = 0
+      for line in p.outputStream.lines():
+        let path = line.strip()
+        if path.len > 0 and path.startsWith(home) and fileExists(path):
+          result.add path
+          inc count
+          if count >= limit: break
+      if result.len > 0: return
+    except:
+      discard
+
+  # 3) Fallback: constrained walk (home and ~/.config), shallow-ish
+  for base in @[home / ".config", home]:
+    var n = result.len
+    for p in walkDirRec(base, yieldFilter = {pcFile}):
+      if n >= limit: break
+      let fn = p.extractFilename
+      if fn.len > 0 and fn.toLowerAscii.contains(q.toLowerAscii):
+        result.add p
+        inc n
+    if result.len >= limit: break
+
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return entries from ~/.config matching `query` (case-insensitive).
   let base = getHomeDir() / ".config"
@@ -472,9 +538,9 @@ type CmdKind = enum
   ckNone,        # no special prefix
   ckTheme,       # `t:`
   ckConfig,      # `c:`
+  ckSearch,      # `s:` fast file search
   ckWeb,         # `y:`, `g:`, `w:`
   ckRun          # raw `/` command
-
 
 proc parseCommand(inputText: string): (CmdKind, string, int) =
   ## Parse *inputText* and return the command kind, remainder, and web spec index.
@@ -485,6 +551,8 @@ proc parseCommand(inputText: string): (CmdKind, string, int) =
     return (ckConfig, rest, -1)
   if takePrefix(inputText, "t:", rest):
     return (ckTheme, rest, -1)
+  if takePrefix(inputText, "s:", rest):
+    return (ckSearch, rest, -1)
   for i, spec in webSpecs:
     if takePrefix(inputText, spec.prefix, rest):
       return (ckWeb, rest, i)
@@ -523,6 +591,72 @@ proc buildActions() =
     actions.add Action(kind: spec.kind,
                        label: spec.label & rest,
                        exec: spec.base & encodeUrl(rest))
+
+  of ckSearch:
+    # Draw a quick "Searching…" hint for potentially long scans.
+    gui.notifyStatus("Searching…", 1200)
+    gui.redrawWindow()
+
+    let paths = scanFilesFast(rest)
+
+    proc pathDepth(s: string): int =
+      var d = 0
+      for ch in s:
+        if ch == '/': inc d
+      d
+
+    let home = getHomeDir()
+    var top = initHeapQueue[(int, string)]()
+    let limit = config.maxVisibleItems
+
+    for p in paths:
+      let name = p.extractFilename
+      var s = scoreMatch(rest, name, p, home)
+
+      # Prefer exact/prefix basename matches heavily
+      let ql = rest.toLowerAscii
+      let nl = name.toLowerAscii
+      if nl == ql: s += 12_000
+      elif nl.startsWith(ql): s += 4_000
+
+      # Prefer items under $HOME; penalize outside
+      if p.startsWith(home & "/"):
+        s += 800
+        # Prefer shallower paths (e.g., ~/.bashrc over ~/Steam/.../.bashrc)
+        let dir = p[0 ..< max(0, p.len - name.len)]
+        let relDepth = max(0, pathDepth(dir) - pathDepth(home))
+        s -= min(relDepth, 10) * 200
+        # Big boost for files directly in $HOME
+        if dir == home or dir == (home & "/"):
+          s += 5_000
+          # Extra for dotfiles in $HOME like ~/.bashrc
+          if name.len > 0 and name[0] == '.':
+            s += 4_000
+      else:
+        s -= 2_000
+
+      if s > -1_000_000:
+        push(top, (s, p))
+        if top.len > max(limit, 200):   # keep more candidates before final sort
+          discard pop(top)
+
+    var ranked: seq[(int, string)] = @[]
+    while top.len > 0:
+      ranked.add pop(top)
+    ranked.sort(proc(a, b: (int, string)): int = cmp(b[0], a[0]))
+
+    for i, it in ranked:
+      if i >= limit: break
+      let p = it[1]
+      #let name = p.extractFilename
+      #actions.add Action(kind: akFile, label: name, exec: p)
+      let name = p.extractFilename
+      var dir = p[0 ..< max(0, p.len - name.len)]
+      while dir.len > 0 and dir[^1] == '/':
+        dir.setLen(dir.len - 1)
+      let pretty = name & " — " & shortenPath(dir)
+      actions.add Action(kind: akFile, label: pretty, exec: p)
+
   of ckRun:
     if rest.len > 0:
       actions.add Action(kind: akRun, label: "Run: " & rest, exec: rest)
@@ -585,7 +719,7 @@ proc buildActions() =
       matchSpans.add @[]
     else:
       case act.kind
-      of akApp, akConfig, akTheme:
+      of akApp, akConfig, akTheme, akFile:
         matchSpans.add subseqSpans(q, act.label)
       of akYouTube, akGoogle, akWiki:
         let off = max(0, act.label.len - q.len)
@@ -614,6 +748,12 @@ proc performAction(a: Action) =
     openUrl(a.exec)
   of akConfig:
     discard startProcess("/bin/sh", args = ["-c", a.exec], options = {poDaemon})
+
+  of akFile:
+    if not openPathWithDefault(a.exec):
+      # Fallback to xdg-open if helper failed for some reason
+      discard startProcess("/usr/bin/env", args = @["xdg-open", a.exec], options = {poDaemon})
+
   of akApp:
     discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()],
                          options = {poDaemon})
