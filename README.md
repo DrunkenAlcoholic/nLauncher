@@ -11,10 +11,7 @@
 
 | Feature | Notes |
 | ------- | ----- |
-|         |       |
-
 | **Scored fuzzy search**              | Better ranking on prefixes, word starts, and tight matches                                                                           |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
 | **Per-character match highlighting** | Matching letters are bold & colored (theme-configurable)                                                                             |
 | **Live clock**                       | Small HH\:mm clock in the bottom-right                                                                                               |
 | **Sub-1 ms startup (bench mode)**    | `--bench` flag for raw launch timing                                                                                                 |
