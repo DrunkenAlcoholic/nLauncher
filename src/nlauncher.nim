@@ -3,15 +3,24 @@
 
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, osproc, strutils, options, tables, sequtils, json, uri, sets,
-    algorithm, times, heapqueue, streams]
+            algorithm, times, heapqueue, streams]
 import parsetoml as toml
-import x11/[xlib, x, xutil, keysym]
+import x11/[xlib, xutil, x, keysym]
 import ./[state, parser, gui, utils]
 
 # ── Module-local globals ────────────────────────────────────────────────
 var
-  currentThemeIndex = 0 ## active theme index in `themeList`
-  actions*: seq[Action] ## transient list for the UI
+  currentThemeIndex = 0        ## active theme index in `themeList`
+  actions*: seq[Action]        ## transient list for the UI
+  lastInputChangeMs = 0'i64    ## updated on each keystroke
+  lastSearchBuildMs = 0'i64    ## idle-loop guard to rebuild after debounce
+  lastSearchQuery = ""         ## cache key for s: queries
+  lastSearchResults: seq[string] = @[] ## cached paths for narrowing queries
+
+const
+  SearchDebounceMs = 240     # debounce for s: while typing (unified)
+  SearchFdCap      = 800     # cap external search results from fd/locate
+  SearchShowCap    = 250     # cap items we score per rebuild
 
 # ── Shell / process helpers ─────────────────────────────────────────────
 proc hasHoldFlagLocal(args: seq[string]): bool =
@@ -28,11 +37,10 @@ proc hasHoldFlagLocal(args: seq[string]): bool =
 proc appendShellArgs(argv: var seq[string]; shExe: string; shArgs: seq[string]) =
   ## Append shell executable and its arguments to `argv`.
   argv.add shExe
-  for a in shArgs:
-    argv.add a
+  for a in shArgs: argv.add a
 
 proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string;
-    shArgs: seq[string]): seq[string] =
+                       shArgs: seq[string]): seq[string] =
   ## Normalize command-line to launch a shell inside major terminals.
   var argv = termArgs
   case base
@@ -46,23 +54,20 @@ proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string;
   argv
 
 proc buildShellCommand(cmd, shExe: string; hold = false):
-  tuple[fullCmd: string, shArgs: seq[string]] =
+    tuple[fullCmd: string, shArgs: seq[string]] =
   ## Run user's command in a group, and add a robust hold prompt when needed.
-  ## Grouping `{ ... ; }` prevents suffix binding to pipelines/conditionals.
-  var suffix = ""
-  if not hold:
-    suffix = "; printf '\\n[Press Enter to close]\\n'; read -r _"
+  ## Grouping prevents suffix binding to pipelines/conditionals.
+  let suffix = (if hold: "" else: "; printf '\\n[Press Enter to close]\\n'; read -r _")
   let fullCmd = "{ " & cmd & " ; }" & suffix
   let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
   (fullCmd, shArgs)
-
 
 proc runCommand(cmd: string) =
   ## Run `cmd` in the user's terminal; fall back to /bin/sh if none.
   let bash = findExe("bash")
   let shExe = if bash.len > 0: bash else: "/bin/sh"
 
-  var parts = tokenize(chooseTerminal()) # parser.tokenize
+  var parts = tokenize(chooseTerminal()) # parser.tokenize on config.terminalExe/$TERMINAL
   if parts.len == 0:
     let (_, shArgs) = buildShellCommand(cmd, shExe)
     discard startProcess(shExe, args = shArgs, options = {poDaemon})
@@ -77,11 +82,9 @@ proc runCommand(cmd: string) =
 
   var termArgs = if parts.len > 1: parts[1..^1] else: @[]
   let base = exe.extractFilename()
-
   let hold = hasHoldFlagLocal(termArgs)
   let (_, shArgs) = buildShellCommand(cmd, shExe, hold)
   let argv = buildTerminalArgs(base, termArgs, shExe, shArgs)
-
   discard startProcess(exePath, args = argv, options = {poDaemon})
 
 proc openUrl(url: string) =
@@ -91,29 +94,25 @@ proc openUrl(url: string) =
   except CatchableError as e:
     echo "openUrl failed: ", url, " (", e.name, "): ", e.msg
 
-
 # ── Small searches: ~/.config helper ────────────────────────────────────
 proc shortenPath(p: string; maxLen = 80): string =
   ## Replace $HOME with ~, and ellipsize the middle if too long.
   var s = p
   let home = getHomeDir()
-  if s.startsWith(home & "/"):
-    s = "~" & s[home.len .. ^1]
+  if s.startsWith(home & "/"): s = "~" & s[home.len .. ^1]
   if s.len <= maxLen: return s
-  # keep start and end, ellipsize the middle
   let keep = maxLen div 2 - 2
   if keep <= 0: return s
   result = s[0 ..< keep] & "…" & s[s.len - keep .. ^1]
 
 proc scanFilesFast*(query: string): seq[string] =
-  ## Fast file search:
-  ##  1) use `fd` if available (fast, respects .gitignore)
-  ##  2) fallback to `locate -i` (DB backed, may be stale)
-  ##  3) final fallback: bounded walk under $HOME (slowest)
-  ## Errors are logged (not swallowed) for easier diagnosis.
-  let home = getHomeDir()
-  let ql   = query.toLowerAscii
-  let limit = 5000  # generous cap; ranking trims to visible later
+  ## Fast file search in order:
+  ##  1) `fd` (fast, respects .gitignore)
+  ##  2) `locate -i` (DB backed, may be stale)
+  ##  3) bounded walk under $HOME (slowest)
+  let home  = getHomeDir()
+  let ql    = query.toLowerAscii
+  let limit = SearchFdCap
 
   try:
     # --- Prefer `fd` ----------------------------------------------------
@@ -144,7 +143,6 @@ proc scanFilesFast*(query: string): seq[string] =
     # --- Final fallback: bounded walk under $HOME -----------------------
     var count = 0
     for path in walkDirRec(home, yieldFilter = {pcFile}):
-      # simple substring match on the full path (lowercased once)
       if path.toLowerAscii.contains(ql):
         result.add(path)
         inc count
@@ -152,7 +150,6 @@ proc scanFilesFast*(query: string): seq[string] =
 
   except CatchableError as e:
     echo "scanFilesFast warning: ", e.name, ": ", e.msg
-
 
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return entries from ~/.config matching `query` (case-insensitive).
@@ -166,8 +163,6 @@ proc scanConfigFiles*(query: string): seq[DesktopApp] =
         exec: "xdg-open " & shellQuote(path),
         hasIcon: false
       )
-
-
 
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
@@ -226,7 +221,6 @@ proc saveLastTheme(cfgPath: string) =
         inTheme = false
         break
   if inTheme and not updated:
-    # We were in [theme] section at EOF — append the key now.
     lines.add("last_chosen = \"" & config.themeName & "\"")
     updated = true
   if not themeSectionFound:
@@ -237,29 +231,24 @@ proc saveLastTheme(cfgPath: string) =
   if updated:
     writeFile(cfgPath, lines.join("\n"))
 
-
 proc cycleTheme*(cfg: var Config) =
   ## Cycle to the next theme in `themeList` and persist the choice.
-  if themeList.len == 0:
-    return  # nothing to cycle; avoids mod-by-zero if config has no themes
+  if themeList.len == 0: return
   currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
   let th = themeList[currentThemeIndex]
   applyThemeAndColors(cfg, th.name)
   saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
 
-
 # ── Applications discovery (.desktop) ───────────────────────────────────
 proc loadApplications() =
   ## Scan .desktop files with caching to ~/.cache/nlauncher/apps.json.
-  let usrDir = "/usr/share/applications"
-  let locDir = getHomeDir() / ".local/share/applications"
+  let usrDir   = "/usr/share/applications"
+  let locDir   = getHomeDir() / ".local/share/applications"
   let cacheDir = getHomeDir() / ".cache" / "nlauncher"
   let cacheFile = cacheDir / "apps.json"
 
-  let usrM = if dirExists(usrDir): times.toUnix(getLastModificationTime(
-      usrDir)) else: 0'i64
-  let locM = if dirExists(locDir): times.toUnix(getLastModificationTime(
-      locDir)) else: 0'i64
+  let usrM = if dirExists(usrDir): times.toUnix(getLastModificationTime(usrDir)) else: 0'i64
+  let locM = if dirExists(locDir): times.toUnix(getLastModificationTime(locDir)) else: 0'i64
 
   if fileExists(cacheFile):
     try:
@@ -278,20 +267,18 @@ proc loadApplications() =
       if not dirExists(dir): continue
       for path in walkFiles(dir / "*.desktop"):
         let opt = parseDesktopFile(path)
-        if isSome(opt): # ← prefix call (or: if opt.isSome()):
-          let app = get(opt) # ← prefix call (or: let app = opt.get())
+        if isSome(opt):
+          let app = get(opt)
           let key = getBaseExec(app.exec)
           if not dedup.hasKey(key) or (app.hasIcon and not dedup[key].hasIcon):
             dedup[key] = app
-
 
     allApps = dedup.values.toSeq
     allApps.sort(proc(a, b: DesktopApp): int = cmpIgnoreCase(a.name, b.name))
     filteredApps = allApps
     try:
       createDir(cacheDir)
-      writeFile(cacheFile, pretty(%CacheData(usrMtime: usrM, localMtime: locM,
-          apps: allApps)))
+      writeFile(cacheFile, pretty(%CacheData(usrMtime: usrM, localMtime: locM, apps: allApps)))
     except:
       echo "Warning: cache not saved."
 
@@ -399,14 +386,11 @@ proc takePrefix(input, pfx: string; rest: var string): bool =
   let n = pfx.len
   if input.len >= n and input[0..n-1] == pfx:
     if input.len == n:
-      rest = ""
-      return true
+      rest = ""; return true
     if input.len > n:
       if input[n] == ' ':
-        rest = input[n+1 .. ^1].strip()
-        return true
-      rest = input[n .. ^1].strip()
-      return true
+        rest = input[n+1 .. ^1].strip(); return true
+      rest = input[n .. ^1].strip(); return true
   false
 
 proc subseqPositions(q, t: string): seq[int] =
@@ -419,14 +403,12 @@ proc subseqPositions(q, t: string): seq[int] =
     if qi < lq.len and lt[i] == lq[qi]:
       result.add i
       inc qi
-      if qi == lq.len:
-        return
+      if qi == lq.len: return
   result.setLen(0)
 
 proc subseqSpans(q, t: string): seq[(int, int)] =
   ## Convert positions to 1-char spans for highlighting.
-  for p in subseqPositions(q, t):
-    result.add (p, 1)
+  for p in subseqPositions(q, t): result.add (p, 1)
 
 proc isWordBoundary(lt: string; idx: int): bool =
   ## Basic token boundary check for nicer scoring.
@@ -436,7 +418,7 @@ proc isWordBoundary(lt: string; idx: int): bool =
 
 proc scoreMatch(q, t, fullPath, home: string): int =
   ## Heuristic score for matching q against t (higher is better).
-  ## Now typo-friendly: supports 1 edit (ins/del/sub) or one adjacent transposition.
+  ## Typo-friendly: 1 edit (ins/del/sub) or one adjacent transposition.
   if q.len == 0: return -1_000_000
   let lq = q.toLowerAscii
   let lt = t.toLowerAscii
@@ -444,49 +426,27 @@ proc scoreMatch(q, t, fullPath, home: string): int =
 
   # fast helpers (no alloc)
   proc withinOneEdit(a, b: string): bool =
-    ## true if a and b are within Levenshtein distance 1 (no transpositions)
-    let m = a.len
-    let n = b.len
+    let m = a.len; let n = b.len
     if abs(m - n) > 1: return false
-    var i = 0
-    var j = 0
-    var edits = 0
+    var i = 0; var j = 0; var edits = 0
     while i < m and j < n:
-      if a[i] == b[j]:
-        inc i; inc j
+      if a[i] == b[j]: inc i; inc j
       else:
-        inc edits
-        if edits > 1: return false
-        if m == n: inc i; inc j     # substitution
-        elif m < n: inc j           # insertion in a (skip one in b)
-        else: inc i                 # deletion from a
+        inc edits; if edits > 1: return false
+        if m == n: inc i; inc j
+        elif m < n: inc j
+        else: inc i
     edits += (m - i) + (n - j)
     edits <= 1
 
   proc withinOneTransposition(a, b: string): bool =
-    ## true if a == b except for a single adjacent swap (e.g., "firfeox" vs "firefox")
     if a.len != b.len or a.len < 2: return false
-
-    # Find first mismatch
     var k = 0
-    while k < a.len and a[k] == b[k]:
-      inc k
-
-    # No mismatch or mismatch at last char → not a single adjacent swap
-    if k >= a.len - 1:
-      return false
-
-    # Require adjacent swap at k/k+1
-    if not (a[k] == b[k+1] and a[k+1] == b[k]):
-      return false
-
-    # Tails after k+1 must match
+    while k < a.len and a[k] == b[k]: inc k
+    if k >= a.len - 1: return false
+    if not (a[k] == b[k+1] and a[k+1] == b[k]): return false
     let tailStart = k + 2
-    if tailStart < a.len:
-      return a[tailStart .. ^1] == b[tailStart .. ^1]
-    else:
-      return true
-
+    if tailStart < a.len: a[tailStart .. ^1] == b[tailStart .. ^1] else: true
 
   var s = -1_000_000
   if pos >= 0:
@@ -500,8 +460,6 @@ proc scoreMatch(q, t, fullPath, home: string): int =
   elif lt.startsWith(lq): s += 8200
   elif pos >= 0: s += 7800
   else:
-    # Sliding-window typo tolerance:
-    # Check windows of size |q|-1, |q|, |q|+1 inside lt for <=1 edit or one transposition.
     var typoHit = false
     if lq.len >= 2:
       let sizes = [max(1, lq.len - 1), lq.len, lq.len + 1]
@@ -513,23 +471,19 @@ proc scoreMatch(q, t, fullPath, home: string): int =
           let seg = lt[start ..< start + L]
           if withinOneEdit(lq, seg) or withinOneTransposition(lq, seg):
             typoHit = true
-            # score slightly below a real substring; prefer earlier and prefix positions
             var base = 7700
-            if start == 0: base = 7950     # "prefx" vs "prefix…"
-            s = max(s, base - min(120, start)) # earlier segments rank higher
+            if start == 0: base = 7950
+            s = max(s, base - min(120, start))
             break
           inc start
         if typoHit: break
-
     if not typoHit and lq.len >= 2:
-      # As a last resort, allow single-edit against the full title (helps very short titles)
       if withinOneEdit(lq, lt) or withinOneTransposition(lq, lt):
         s = max(s, 7600)
 
   if fullPath.startsWith(home & "/"):
     if lt == lq: s += 600
     elif lt.startsWith(lq): s += 400
-
   s
 
 # ── Web shortcuts ───────────────────────────────────────────────────────
@@ -551,30 +505,16 @@ type CmdKind = enum
 
 proc parseCommand(inputText: string): (CmdKind, string, int) =
   ## Parse *inputText* and return the command kind, remainder, and web spec index.
-  ## The index is `-1` unless `kind` is `ckWeb`.
   var rest: string
-
-  if takePrefix(inputText, "c:", rest):
-    return (ckConfig, rest, -1)
-  if takePrefix(inputText, "t:", rest):
-    return (ckTheme, rest, -1)
-  if takePrefix(inputText, "s:", rest):
-    return (ckSearch, rest, -1)
+  if takePrefix(inputText, "c:", rest): return (ckConfig, rest, -1)
+  if takePrefix(inputText, "t:", rest): return (ckTheme, rest, -1)
+  if takePrefix(inputText, "s:", rest): return (ckSearch, rest, -1)
   for i, spec in webSpecs:
-    if takePrefix(inputText, spec.prefix, rest):
-      return (ckWeb, rest, i)
-
-  if not inputText.startsWith("/"):
-    return (ckNone, inputText, -1)
-
-  if takePrefix(inputText, "/t", rest): # legacy alias
-    return (ckTheme, rest, -1)
-
-  # Default slash command → / …
+    if takePrefix(inputText, spec.prefix, rest): return (ckWeb, rest, i)
+  if not inputText.startsWith("/"): return (ckNone, inputText, -1)
+  if takePrefix(inputText, "/t", rest): return (ckTheme, rest, -1) # legacy alias
   discard takePrefix(inputText, "/", rest)
-  return (ckRun, rest.strip(), -1)
-
-
+  (ckRun, rest.strip(), -1)
 
 proc visibleQuery(inputText: string): string =
   ## Return the user's query sans command prefix so highlight works.
@@ -595,9 +535,11 @@ proc buildActions() =
     for th in themeList:
       if ql.len == 0 or th.name.toLowerAscii.contains(ql):
         actions.add Action(kind: akTheme, label: th.name, exec: th.name)
+
   of ckConfig:
     for a in scanConfigFiles(rest):
       actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
+
   of ckWeb:
     let spec = webSpecs[webIdx]
     actions.add Action(kind: spec.kind,
@@ -605,75 +547,83 @@ proc buildActions() =
                        exec: spec.base & encodeUrl(rest))
 
   of ckSearch:
-    # Draw a quick "Searching…" hint for potentially long scans.
-    gui.notifyStatus("Searching…", 1200)
-    gui.redrawWindow()
+    # Debounce heavy file scans while user is typing quickly.
+    let sinceEdit = gui.nowMs() - lastInputChangeMs
+    if rest.len < 2 or sinceEdit < SearchDebounceMs:
+      actions.add Action(kind: akConfig, label: "Searching…", exec: "")
+      handled = true
+    else:
+      gui.notifyStatus("Searching…", 1200)
 
-    let paths = scanFilesFast(rest)
-
-    proc pathDepth(s: string): int =
-      var d = 0
-      for ch in s:
-        if ch == '/': inc d
-      d
-
-    let home = getHomeDir()
-    var top = initHeapQueue[(int, string)]()
-    let limit = config.maxVisibleItems
-
-    for p in paths:
-      let name = p.extractFilename
-      var s = scoreMatch(rest, name, p, home)
-
-      # Prefer exact/prefix basename matches heavily
-      let ql = rest.toLowerAscii
-      let nl = name.toLowerAscii
-      if nl == ql: s += 12_000
-      elif nl.startsWith(ql): s += 4_000
-
-      # Prefer items under $HOME; penalize outside
-      if p.startsWith(home & "/"):
-        s += 800
-        # Prefer shallower paths (e.g., ~/.bashrc over ~/Steam/.../.bashrc)
-        let dir = p[0 ..< max(0, p.len - name.len)]
-        let relDepth = max(0, pathDepth(dir) - pathDepth(home))
-        s -= min(relDepth, 10) * 200
-        # Big boost for files directly in $HOME
-        if dir == home or dir == (home & "/"):
-          s += 5_000
-          # Extra for dotfiles in $HOME like ~/.bashrc
-          if name.len > 0 and name[0] == '.':
-            s += 4_000
+      # Reuse previous scan results if user is narrowing the query (prefix grow).
+      var paths: seq[string]
+      if lastSearchQuery.len > 0 and rest.len >= lastSearchQuery.len and
+         rest.startsWith(lastSearchQuery) and lastSearchResults.len > 0:
+        paths = lastSearchResults
       else:
-        s -= 2_000
+        paths = scanFilesFast(rest)
+        lastSearchQuery = rest
+        lastSearchResults = paths
 
-      if s > -1_000_000:
-        push(top, (s, p))
-        if top.len > max(limit, 200):   # keep more candidates before final sort
-          discard pop(top)
+      let maxScore = min(paths.len, SearchShowCap)
 
-    var ranked: seq[(int, string)] = @[]
-    while top.len > 0:
-      ranked.add pop(top)
-    ranked.sort(proc(a, b: (int, string)): int = cmp(b[0], a[0]))
+      proc pathDepth(s: string): int =
+        var d = 0
+        for ch in s:
+          if ch == '/': inc d
+        d
 
-    for i, it in ranked:
-      if i >= limit: break
-      let p = it[1]
-      #let name = p.extractFilename
-      #actions.add Action(kind: akFile, label: name, exec: p)
-      let name = p.extractFilename
-      var dir = p[0 ..< max(0, p.len - name.len)]
-      while dir.len > 0 and dir[^1] == '/':
-        dir.setLen(dir.len - 1)
-      let pretty = name & " — " & shortenPath(dir)
-      actions.add Action(kind: akFile, label: pretty, exec: p)
+      let home = getHomeDir()
+      var top = initHeapQueue[(int, string)]()
+      let limit = config.maxVisibleItems
+      let ql = rest.toLowerAscii
+
+      for idx in 0 ..< maxScore:
+        let p = paths[idx]
+        let name = p.extractFilename
+        var s = scoreMatch(rest, name, p, home)
+
+        # Prefer exact/prefix basename matches heavily
+        let nl = name.toLowerAscii
+        if nl == ql: s += 12_000
+        elif nl.startsWith(ql): s += 4_000
+
+        # Prefer items under $HOME; penalize outside and very deep paths
+        if p.startsWith(home & "/"):
+          s += 800
+          let dir = p[0 ..< max(0, p.len - name.len)]
+          let relDepth = max(0, pathDepth(dir) - pathDepth(home))
+          s -= min(relDepth, 10) * 200
+          if dir == home or dir == (home & "/"):
+            s += 5_000
+            if name.len > 0 and name[0] == '.': s += 4_000
+        else:
+          s -= 2_000
+
+        if s > -1_000_000:
+          push(top, (s, p))
+          if top.len > max(limit, 200): discard pop(top)
+
+      var ranked: seq[(int, string)] = @[]
+      while top.len > 0: ranked.add pop(top)
+      ranked.sort(proc(a, b: (int, string)): int = cmp(b[0], a[0]))
+
+      let showCap = max(limit, min(40, SearchShowCap))  # draw a fuller slice than visible
+      for i, it in ranked:
+        if i >= showCap: break
+        let p = it[1]
+        let name = p.extractFilename
+        var dir = p[0 ..< max(0, p.len - name.len)]
+        while dir.len > 0 and dir[^1] == '/': dir.setLen(dir.len - 1)
+        let pretty = name & " — " & shortenPath(dir)
+        actions.add Action(kind: akFile, label: pretty, exec: p)
 
   of ckRun:
     if rest.len > 0:
       actions.add Action(kind: akRun, label: "Run: " & rest, exec: rest)
     else:
       handled = false
+
   of ckNone:
     handled = false
 
@@ -681,8 +631,7 @@ proc buildActions() =
   if not handled:
     if rest.len == 0:
       var index = initTable[string, DesktopApp](allApps.len * 2)
-      for app in allApps:
-        index[app.name] = app
+      for app in allApps: index[app.name] = app
 
       var seen = initHashSet[string]()
       for name in recentApps:
@@ -702,11 +651,9 @@ proc buildActions() =
         let s = scoreMatch(rest, app.name, app.name, "")
         if s > -1_000_000:
           push(top, (s + recentBoost(app.name), i))
-          if top.len > limit:
-            discard pop(top)
+          if top.len > limit: discard pop(top)
       var ranked: seq[(int, int)] = @[]
-      while top.len > 0:
-        ranked.add pop(top)
+      while top.len > 0: ranked.add pop(top)
       ranked.sort(proc(a, b: (int, int)): int =
         result = cmp(b[0], a[0])
         if result == 0: result = cmpIgnoreCase(allApps[a[1]].name, allApps[b[1]].name)
@@ -760,32 +707,24 @@ proc performAction(a: Action) =
     openUrl(a.exec)
   of akConfig:
     discard startProcess("/bin/sh", args = ["-c", a.exec], options = {poDaemon})
-
   of akFile:
     if not openPathWithDefault(a.exec):
-      # Fallback to xdg-open if helper failed for some reason
       discard startProcess("/usr/bin/env", args = @["xdg-open", a.exec], options = {poDaemon})
-
   of akApp:
+    # safer: strip .desktop field codes before launching
     let sanitized = parser.stripFieldCodes(a.exec).strip()
     discard startProcess("/bin/sh", args = ["-c", sanitized], options = {poDaemon})
-
     let ri = recentApps.find(a.label)
-    if ri >= 0:
-      recentApps.delete(ri)
+    if ri >= 0: recentApps.delete(ri)
     recentApps.insert(a.label, 0)
-
     if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
     saveRecent()
   of akTheme:
     ## Apply and persist, but DO NOT reset selection or exit.
-    applyThemeAndColors(config, a.exec) # a.exec carries the theme name
+    applyThemeAndColors(config, a.exec)
     saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
     exitAfter = false
-  # no `else`: all cases covered
-  if exitAfter:
-    shouldExit = true
-
+  if exitAfter: shouldExit = true
 
 # ── Main loop ───────────────────────────────────────────────────────────
 proc main() =
@@ -806,6 +745,16 @@ proc main() =
 
   while not shouldExit:
     if XPending(display) == 0:
+      # Debounce wake-up: if we're in s: search, rebuild after idle
+      let (cmd, rest, _) = parseCommand(inputText)
+      if cmd == ckSearch:
+        let sinceEdit = gui.nowMs() - lastInputChangeMs
+        if rest.len >= 2 and sinceEdit >= SearchDebounceMs and
+           lastSearchBuildMs < lastInputChangeMs:
+          lastSearchBuildMs = gui.nowMs()
+          buildActions()
+          gui.redrawWindow()
+          continue
       sleep(10)
       continue
 
@@ -830,15 +779,14 @@ proc main() =
           performAction(actions[selectedIndex])
 
       of XK_BackSpace, XK_Left:
-        ## Backspace: remove last char. Also map Left→Backspace so you can
-        ## quickly “go backwards” to fix a typo without needing Delete.
+        ## Backspace: remove last char. Also map Left→Backspace for quick fix.
         if inputText.len > 0:
           inputText.setLen(inputText.len - 1)
+          lastInputChangeMs = gui.nowMs()
           buildActions()
 
       of XK_Right:
-        ## No-op for now (we don’t support mid-string cursor editing yet).
-        discard
+        discard # no mid-string editing yet
 
       of XK_Up:
         if selectedIndex > 0:
@@ -852,31 +800,26 @@ proc main() =
             viewOffset = selectedIndex - config.maxVisibleItems + 1
 
       of XK_Page_Up:
-        ## Jump up by one page (maxVisibleItems).
         if filteredApps.len > 0:
           let step = max(1, config.maxVisibleItems)
           selectedIndex = max(0, selectedIndex - step)
           viewOffset = max(0, viewOffset - step)
 
       of XK_Page_Down:
-        ## Jump down by one page (maxVisibleItems).
         if filteredApps.len > 0:
           let step = max(1, config.maxVisibleItems)
           selectedIndex = min(filteredApps.len - 1, selectedIndex + step)
           let bottom = viewOffset + config.maxVisibleItems - 1
           if selectedIndex > bottom:
-            viewOffset = min(selectedIndex, filteredApps.len - 1) - (
-                config.maxVisibleItems - 1)
+            viewOffset = min(selectedIndex, filteredApps.len - 1) - (config.maxVisibleItems - 1)
             if viewOffset < 0: viewOffset = 0
 
       of XK_Home:
-        ## Go to the first result.
         if filteredApps.len > 0:
           selectedIndex = 0
           viewOffset = 0
 
       of XK_End:
-        ## Go to the last result.
         if filteredApps.len > 0:
           selectedIndex = filteredApps.len - 1
           viewOffset = max(0, filteredApps.len - config.maxVisibleItems)
@@ -887,6 +830,7 @@ proc main() =
       else:
         if buf[0] != '\0' and buf[0] >= ' ':
           inputText.add(buf[0])
+          lastInputChangeMs = gui.nowMs()
           buildActions()
 
       if not shouldExit:
