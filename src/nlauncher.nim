@@ -47,10 +47,15 @@ proc buildTerminalArgs(base: string; termArgs: seq[string]; shExe: string;
 
 proc buildShellCommand(cmd, shExe: string; hold = false):
   tuple[fullCmd: string, shArgs: seq[string]] =
-  ## Append hold helper and construct shell arguments.
-  let fullCmd = if hold: cmd else: cmd & "; echo; echo '[Press Enter to close]'; read _"
+  ## Run user's command in a group, and add a robust hold prompt when needed.
+  ## Grouping `{ ... ; }` prevents suffix binding to pipelines/conditionals.
+  var suffix = ""
+  if not hold:
+    suffix = "; printf '\\n[Press Enter to close]\\n'; read -r _"
+  let fullCmd = "{ " & cmd & " ; }" & suffix
   let shArgs = if shExe.endsWith("bash"): @["-lc", fullCmd] else: @["-c", fullCmd]
   (fullCmd, shArgs)
+
 
 proc runCommand(cmd: string) =
   ## Run `cmd` in the user's terminal; fall back to /bin/sh if none.
@@ -80,8 +85,12 @@ proc runCommand(cmd: string) =
   discard startProcess(exePath, args = argv, options = {poDaemon})
 
 proc openUrl(url: string) =
-  ## Open *url* via xdg-open (no shell involved).
-  discard startProcess("/usr/bin/env", args = @["xdg-open", url], options = {poDaemon})
+  ## Open *url* via xdg-open (no shell involved). Log failures for diagnosis.
+  try:
+    discard startProcess("/usr/bin/env", args = @["xdg-open", url], options = {poDaemon})
+  except CatchableError as e:
+    echo "openUrl failed: ", url, " (", e.name, "): ", e.msg
+
 
 # ── Small searches: ~/.config helper ────────────────────────────────────
 proc shortenPath(p: string; maxLen = 80): string =
@@ -96,73 +105,69 @@ proc shortenPath(p: string; maxLen = 80): string =
   if keep <= 0: return s
   result = s[0 ..< keep] & "…" & s[s.len - keep .. ^1]
 
-proc scanFilesFast*(query: string; limit = 400): seq[string] =
-  ## Return absolute file paths matching `query` quickly.
-  ## Priority: fd → locate → fallback walk (~/.config and ~).
-  if query.len == 0: return @[]
-
+proc scanFilesFast*(query: string): seq[string] =
+  ## Fast file search:
+  ##  1) use `fd` if available (fast, respects .gitignore)
+  ##  2) fallback to `locate -i` (DB backed, may be stale)
+  ##  3) final fallback: bounded walk under $HOME (slowest)
+  ## Errors are logged (not swallowed) for easier diagnosis.
   let home = getHomeDir()
-  let q = query
+  let ql   = query.toLowerAscii
+  let limit = 5000  # generous cap; ranking trims to visible later
 
-  # 1) fd (fastest). We want absolute paths, case-insensitive, files only.
-  let fdExe = findExe("fd")
-  if fdExe.len > 0:
-    try:
-      #let args = @["-i", "--type", "f", "--absolute-path", "--max-results", $limit, q, home]
-      # Add hidden files "-H" 
-      let args = @["-i", "-H", "--type", "f", "--absolute-path", "--max-results", $limit, q, home]
+  try:
+    # --- Prefer `fd` ----------------------------------------------------
+    let fdExe = findExe("fd")
+    if fdExe.len > 0:
+      let args = @[
+        "-i", "--type", "f", "--absolute-path",
+        "--max-results", $limit, query, home
+      ]
       let p = startProcess(fdExe, args = args, options = {poUsePath, poStdErrToStdOut})
-      defer: osproc.close(p)
-      let buf = p.outputStream.readAll()
-      for line in buf.splitLines():
-        let path = line.strip()
-        if path.len > 0 and fileExists(path):
-          result.add path
+      defer: close(p)
+      let output = p.outputStream.readAll()
+      for line in output.splitLines():
+        if line.len > 0: result.add(line)
       return
-    except:
-      discard
 
-  # 2) locate (very fast if db is present)
-  let locExe = findExe("locate")
-  if locExe.len > 0:
-    try:
-      let p = startProcess(locExe, args = @[q], options = {poUsePath, poStdErrToStdOut})
-      defer: osproc.close(p)
-      var count = 0
-      for line in p.outputStream.lines():
-        let path = line.strip()
-        if path.len > 0 and path.startsWith(home) and fileExists(path):
-          result.add path
-          inc count
-          if count >= limit: break
-      if result.len > 0: return
-    except:
-      discard
+    # --- Fallback: `locate -i` -----------------------------------------
+    let locExe = findExe("locate")
+    if locExe.len > 0:
+      let p = startProcess(locExe, args = @["-i", "-l", $limit, query],
+                           options = {poUsePath, poStdErrToStdOut})
+      defer: close(p)
+      let output = p.outputStream.readAll()
+      for line in output.splitLines():
+        if line.len > 0: result.add(line)
+      return
 
-  # 3) Fallback: constrained walk (home and ~/.config), shallow-ish
-  for base in @[home / ".config", home]:
-    var n = result.len
-    for p in walkDirRec(base, yieldFilter = {pcFile}):
-      if n >= limit: break
-      let fn = p.extractFilename
-      if fn.len > 0 and fn.toLowerAscii.contains(q.toLowerAscii):
-        result.add p
-        inc n
-    if result.len >= limit: break
+    # --- Final fallback: bounded walk under $HOME -----------------------
+    var count = 0
+    for path in walkDirRec(home, yieldFilter = {pcFile}):
+      # simple substring match on the full path (lowercased once)
+      if path.toLowerAscii.contains(ql):
+        result.add(path)
+        inc count
+        if count >= limit: break
+
+  except CatchableError as e:
+    echo "scanFilesFast warning: ", e.name, ": ", e.msg
+
 
 proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return entries from ~/.config matching `query` (case-insensitive).
   let base = getHomeDir() / ".config"
-  let ql = query.toLowerAscii
-  for path in walkDirRec(base):
-    if fileExists(path):
-      let fn = path.extractFilename
-      if fn.len > 0 and fn.toLowerAscii.contains(ql):
-        result.add DesktopApp(
-          name: fn,
-          exec: "xdg-open " & shellQuote(path),
-          hasIcon: false
-        )
+  let ql   = query.toLowerAscii
+  for path in walkDirRec(base, yieldFilter = {pcFile}):
+    let fn = path.extractFilename
+    if fn.len > 0 and fn.toLowerAscii.contains(ql):
+      result.add DesktopApp(
+        name: fn,
+        exec: "xdg-open " & shellQuote(path),
+        hasIcon: false
+      )
+
+
 
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
@@ -235,6 +240,8 @@ proc saveLastTheme(cfgPath: string) =
 
 proc cycleTheme*(cfg: var Config) =
   ## Cycle to the next theme in `themeList` and persist the choice.
+  if themeList.len == 0:
+    return  # nothing to cycle; avoids mod-by-zero if config has no themes
   currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
   let th = themeList[currentThemeIndex]
   applyThemeAndColors(cfg, th.name)
@@ -563,6 +570,11 @@ proc parseCommand(inputText: string): (CmdKind, string, int) =
   if takePrefix(inputText, "/t", rest): # legacy alias
     return (ckTheme, rest, -1)
 
+  # Default slash command → / …
+  discard takePrefix(inputText, "/", rest)
+  return (ckRun, rest.strip(), -1)
+
+
 
 proc visibleQuery(inputText: string): string =
   ## Return the user's query sans command prefix so highlight works.
@@ -755,8 +767,9 @@ proc performAction(a: Action) =
       discard startProcess("/usr/bin/env", args = @["xdg-open", a.exec], options = {poDaemon})
 
   of akApp:
-    discard startProcess("/bin/sh", args = ["-c", a.exec.split('%')[0].strip()],
-                         options = {poDaemon})
+    let sanitized = parser.stripFieldCodes(a.exec).strip()
+    discard startProcess("/bin/sh", args = ["-c", sanitized], options = {poDaemon})
+
     let ri = recentApps.find(a.label)
     if ri >= 0:
       recentApps.delete(ri)

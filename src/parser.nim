@@ -18,7 +18,7 @@ import state # DesktopApp
 
 # ── Internal helpers ────────────────────────────────────────────────────
 
-proc stripFieldCodes(s: string): string =
+proc stripFieldCodes*(s: string): string =
   ## Remove .desktop "field codes" from Exec lines (e.g. %f, %F, %u, %U, %i, %c, %k).
   ## We keep '%%' as a literal '%' (the spec’s escape), everything else `%<alpha>` is dropped.
   result = newStringOfCap(s.len)

@@ -122,15 +122,14 @@ proc whichExists*(name: string): bool =
 
 ## Pick a terminal emulator: prefer config.terminalExe, then $TERMINAL, then fallbacks.
 proc chooseTerminal*(): string =
-  if config.terminalExe.len > 0:
+  ## Prefer configured terminal if it exists; else known fallbacks.
+  if config.terminalExe.len > 0 and whichExists(config.terminalExe):
     return config.terminalExe
-  let envTerm = getEnv("TERMINAL")
-  if envTerm.len > 0 and whichExists(envTerm):
-    return envTerm
   for t in fallbackTerms:
     if whichExists(t):
       return t
-  "" # headless
+  ""  # headless
+
 
 # ── Timing helper (for --bench mode) ────────────────────────────────────
 template timeIt*(msg: string; body: untyped) =
@@ -144,18 +143,18 @@ template timeIt*(msg: string; body: untyped) =
 let recentFile* = getHomeDir() / ".cache" / "nlauncher" / "recent.json"
 
 proc loadRecent*() =
-  ## Populate state.recentApps from disk; silent on error.
+  ## Populate state.recentApps from disk; log on error.
   if fileExists(recentFile):
     try:
       let j = parseJson(readFile(recentFile))
       state.recentApps = j.to(seq[string])
-    except:
-      discard
+    except CatchableError as e:
+      echo "loadRecent warning: ", recentFile, " (", e.name, "): ", e.msg
 
 proc saveRecent*() =
-  ## Persist state.recentApps to disk; silent on error.
+  ## Persist state.recentApps to disk; log on error.
   try:
     createDir(recentFile.parentDir)
     writeFile(recentFile, pretty(%state.recentApps))
-  except:
-    discard
+  except CatchableError as e:
+    echo "saveRecent warning: ", recentFile, " (", e.name, "): ", e.msg
