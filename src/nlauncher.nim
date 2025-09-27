@@ -446,7 +446,11 @@ proc scoreMatch(q, t, fullPath, home: string): int =
     if k >= a.len - 1: return false
     if not (a[k] == b[k+1] and a[k+1] == b[k]): return false
     let tailStart = k + 2
-    if tailStart < a.len: a[tailStart .. ^1] == b[tailStart .. ^1] else: true
+    #if tailStart < a.len: a[tailStart .. ^1] == b[tailStart .. ^1] else: true
+    result = if tailStart < a.len:
+      a[tailStart .. ^1] == b[tailStart .. ^1]
+    else:
+      true
 
   var s = -1_000_000
   if pos >= 0:
@@ -737,6 +741,8 @@ proc main() =
 
   initGui()
 
+  # Theme parsing must happen after initGui opens the display but before the
+  # first redraw so Xft colours resolve correctly.
   timeIt "updateParsedColors:": updateParsedColors(config)
   timeIt "updateGuiColors:": gui.updateGuiColors()
   timeIt "Benchmark(Redraw Frame):": gui.redrawWindow()

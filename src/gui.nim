@@ -178,8 +178,8 @@ proc initGui*() =
   overlayFont = loadFont(display, screen, deriveSmallerFont(config.fontName))
   boldFont = loadFont(display, screen, deriveBoldFont(config.fontName))
 
-  timeIt "UpdateGuiColors":
-    updateGuiColors()
+  #timeIt "UpdateGuiColors":
+  #  updateGuiColors()
 
   timeIt "Create Window":
     var winX, winY: cint

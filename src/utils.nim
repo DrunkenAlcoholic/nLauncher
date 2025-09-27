@@ -7,7 +7,7 @@
 
 import std/[os, osproc, strutils, times, json]
 import x11/[xlib, x, xft, xrender]
-import state
+import ./[state, parser]
 
 # ── Shell helpers ───────────────────────────────────────────────────────
 ## Quote a string for safe use inside a POSIX shell single-quoted context.
@@ -122,9 +122,14 @@ proc whichExists*(name: string): bool =
 
 ## Pick a terminal emulator: prefer config.terminalExe, then $TERMINAL, then fallbacks.
 proc chooseTerminal*(): string =
-  ## Prefer configured terminal if it exists; else known fallbacks.
+  ## Prefer configured terminal when it exists; else known fallbacks.
   if config.terminalExe.len > 0 and whichExists(config.terminalExe):
     return config.terminalExe
+  let envTerm = getEnv("TERMINAL")
+  if envTerm.len > 0:
+    let tokens = tokenize(envTerm)
+    if tokens.len > 0 and whichExists(tokens[0]):
+      return envTerm
   for t in fallbackTerms:
     if whichExists(t):
       return t
