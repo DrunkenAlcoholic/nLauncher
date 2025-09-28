@@ -16,6 +16,7 @@ var
   lastSearchBuildMs = 0'i64    ## idle-loop guard to rebuild after debounce
   lastSearchQuery = ""         ## cache key for s: queries
   lastSearchResults: seq[string] = @[] ## cached paths for narrowing queries
+  baseMatchFgColorHex = ""     ## default fallback for match highlight colour
 
 const
   SearchDebounceMs = 240     # debounce for s: while typing (unified)
@@ -167,6 +168,10 @@ proc scanConfigFiles*(query: string): seq[DesktopApp] =
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
   ## Set theme fields from `themeList` by name; respect explicit match color.
+  let fallbackMatch = if baseMatchFgColorHex.len > 0:
+    baseMatchFgColorHex
+  else:
+    cfg.matchFgColorHex
   for i, th in themeList:
     if th.name.toLowerAscii == name.toLowerAscii:
       cfg.bgColorHex = th.bgColorHex
@@ -176,6 +181,8 @@ proc applyTheme*(cfg: var Config; name: string) =
       cfg.borderColorHex = th.borderColorHex
       if th.matchFgColorHex.len > 0:
         cfg.matchFgColorHex = th.matchFgColorHex
+      else:
+        cfg.matchFgColorHex = fallbackMatch
       cfg.themeName = th.name
       currentThemeIndex = i
       break
@@ -314,47 +321,77 @@ proc initLauncherConfig() =
   let tbl = toml.parseFile(cfgPath)
 
   # window
-  let w = tbl["window"]
-  config.winWidth = w["width"].getInt(config.winWidth)
-  config.maxVisibleItems = w["max_visible_items"].getInt(config.maxVisibleItems)
-  config.centerWindow = w["center"].getBool(config.centerWindow)
-  config.positionX = w["position_x"].getInt(config.positionX)
-  config.positionY = w["position_y"].getInt(config.positionY)
-  config.verticalAlign = w["vertical_align"].getStr(config.verticalAlign)
+  if tbl.hasKey("window"):
+    try:
+      let w = tbl["window"].getTable()
+      config.winWidth = w.getOrDefault("width").getInt(config.winWidth)
+      config.maxVisibleItems = w.getOrDefault("max_visible_items").getInt(config.maxVisibleItems)
+      config.centerWindow = w.getOrDefault("center").getBool(config.centerWindow)
+      config.positionX = w.getOrDefault("position_x").getInt(config.positionX)
+      config.positionY = w.getOrDefault("position_y").getInt(config.positionY)
+      config.verticalAlign = w.getOrDefault("vertical_align").getStr(config.verticalAlign)
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [window] section in ", cfgPath
 
   # font
-  let f = tbl["font"]
-  config.fontName = f["fontname"].getStr(config.fontName)
+  if tbl.hasKey("font"):
+    try:
+      let f = tbl["font"].getTable()
+      config.fontName = f.getOrDefault("fontname").getStr(config.fontName)
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [font] section in ", cfgPath
 
   # input
-  let inp = tbl["input"]
-  config.prompt = inp["prompt"].getStr(config.prompt)
-  config.cursor = inp["cursor"].getStr(config.cursor)
+  if tbl.hasKey("input"):
+    try:
+      let inp = tbl["input"].getTable()
+      config.prompt = inp.getOrDefault("prompt").getStr(config.prompt)
+      config.cursor = inp.getOrDefault("cursor").getStr(config.cursor)
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [input] section in ", cfgPath
 
   # terminal
-  let term = tbl["terminal"]
-  config.terminalExe = term["program"].getStr(config.terminalExe)
+  if tbl.hasKey("terminal"):
+    try:
+      let term = tbl["terminal"].getTable()
+      config.terminalExe = term.getOrDefault("program").getStr(config.terminalExe)
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [terminal] section in ", cfgPath
 
   # border
-  let b = tbl["border"]
-  config.borderWidth = b["width"].getInt(config.borderWidth)
+  if tbl.hasKey("border"):
+    try:
+      let b = tbl["border"].getTable()
+      config.borderWidth = b.getOrDefault("width").getInt(config.borderWidth)
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [border] section in ", cfgPath
 
   # themes
   themeList = @[]
-  for thVal in tbl["themes"].getElems():
-    let th = thVal.getTable()
-    themeList.add Theme(
-      name: th["name"].getStr(""),
-      bgColorHex: th["bgColorHex"].getStr(""),
-      fgColorHex: th["fgColorHex"].getStr(""),
-      highlightBgColorHex: th["highlightBgColorHex"].getStr(""),
-      highlightFgColorHex: th["highlightFgColorHex"].getStr(""),
-      borderColorHex: th["borderColorHex"].getStr(""),
-      matchFgColorHex: th.getOrDefault("matchFgColorHex").getStr("")
-    )
+  if tbl.hasKey("themes"):
+    try:
+      for thVal in tbl["themes"].getElems():
+        let th = thVal.getTable()
+        themeList.add Theme(
+          name: th.getOrDefault("name").getStr(""),
+          bgColorHex: th.getOrDefault("bgColorHex").getStr(""),
+          fgColorHex: th.getOrDefault("fgColorHex").getStr(""),
+          highlightBgColorHex: th.getOrDefault("highlightBgColorHex").getStr(""),
+          highlightFgColorHex: th.getOrDefault("highlightFgColorHex").getStr(""),
+          borderColorHex: th.getOrDefault("borderColorHex").getStr(""),
+          matchFgColorHex: th.getOrDefault("matchFgColorHex").getStr("")
+        )
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [[themes]] entries in ", cfgPath
 
   # last_chosen (case-insensitive match; fallback to first theme)
-  let lastName = tbl["theme"]["last_chosen"].getStr("")
+  var lastName = ""
+  if tbl.hasKey("theme"):
+    try:
+      let themeTbl = tbl["theme"].getTable()
+      lastName = themeTbl.getOrDefault("last_chosen").getStr("")
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [theme] section in ", cfgPath
   var pickedIndex = -1
   if lastName.len > 0:
     for i, th in themeList:
@@ -367,6 +404,8 @@ proc initLauncherConfig() =
 
   let chosen = themeList[pickedIndex].name
   config.themeName = chosen
+  if baseMatchFgColorHex.len == 0:
+    baseMatchFgColorHex = config.matchFgColorHex
   applyTheme(config, chosen)
   if chosen != lastName:
     saveLastTheme(cfgPath)
@@ -559,15 +598,20 @@ proc buildActions() =
     else:
       gui.notifyStatus("Searching…", 1200)
 
+      let restLower = rest.toLowerAscii
+
       # Reuse previous scan results if user is narrowing the query (prefix grow).
       var paths: seq[string]
       if lastSearchQuery.len > 0 and rest.len >= lastSearchQuery.len and
          rest.startsWith(lastSearchQuery) and lastSearchResults.len > 0:
-        paths = lastSearchResults
+        for p in lastSearchResults:
+          if p.toLowerAscii.contains(restLower):
+            paths.add p
       else:
         paths = scanFilesFast(rest)
-        lastSearchQuery = rest
-        lastSearchResults = paths
+
+      lastSearchQuery = rest
+      lastSearchResults = paths
 
       let maxScore = min(paths.len, SearchShowCap)
 
@@ -580,7 +624,7 @@ proc buildActions() =
       let home = getHomeDir()
       var top = initHeapQueue[(int, string)]()
       let limit = config.maxVisibleItems
-      let ql = rest.toLowerAscii
+      let ql = restLower
 
       for idx in 0 ..< maxScore:
         let p = paths[idx]
