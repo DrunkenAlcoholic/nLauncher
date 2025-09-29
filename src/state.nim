@@ -66,7 +66,8 @@ type
     akConfig,    # `c:` file under ~/.config
     akFile,      # `s:` file search (open with default app)
     akShortcut,  # configurable shortcut (URL/shell/file)
-    akTheme      # `t:` Theme selector
+    akTheme,     # `t:` Theme selector
+    akPlaceholder
 
 
   ## A single selectable entry in the launcher.

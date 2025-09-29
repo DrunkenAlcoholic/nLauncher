@@ -156,14 +156,17 @@ proc scanConfigFiles*(query: string): seq[DesktopApp] =
   ## Return entries from ~/.config matching `query` (case-insensitive).
   let base = getHomeDir() / ".config"
   let ql   = query.toLowerAscii
-  for path in walkDirRec(base, yieldFilter = {pcFile}):
-    let fn = path.extractFilename
-    if fn.len > 0 and fn.toLowerAscii.contains(ql):
-      result.add DesktopApp(
-        name: fn,
-        exec: "xdg-open " & shellQuote(path),
-        hasIcon: false
-      )
+  try:
+    for path in walkDirRec(base, yieldFilter = {pcFile}):
+      let fn = path.extractFilename
+      if fn.len > 0 and fn.toLowerAscii.contains(ql):
+        result.add DesktopApp(
+          name: fn,
+          exec: "xdg-open " & shellQuote(path),
+          hasIcon: false
+        )
+  except OSError:
+    discard
 
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
@@ -641,7 +644,7 @@ proc buildActions() =
     # Debounce heavy file scans while user is typing quickly.
     let sinceEdit = gui.nowMs() - lastInputChangeMs
     if rest.len < 2 or sinceEdit < SearchDebounceMs:
-      actions.add Action(kind: akConfig, label: "Searching…", exec: "")
+      actions.add Action(kind: akPlaceholder, label: "Searching…", exec: "")
       handled = true
     else:
       gui.notifyStatus("Searching…", 1200)
@@ -774,7 +777,7 @@ proc buildActions() =
       matchSpans.add @[]
     else:
       case act.kind
-      of akApp, akConfig, akTheme, akFile, akShortcut:
+      of akApp, akConfig, akTheme, akFile, akShortcut, akPlaceholder:
         matchSpans.add subseqSpans(q, act.label)
       of akRun:
         const prefix = "Run: "
@@ -824,6 +827,8 @@ proc performAction(a: Action) =
     ## Apply and persist, but DO NOT reset selection or exit.
     applyThemeAndColors(config, a.exec)
     saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
+    exitAfter = false
+  of akPlaceholder:
     exitAfter = false
   if exitAfter: shouldExit = true
 

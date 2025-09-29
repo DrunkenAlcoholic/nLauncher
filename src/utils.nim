@@ -103,7 +103,14 @@ proc openPathWithDefault*(path: string): bool =
     let tokens = tokenize(ed)
     if tokens.len == 0:
       continue
-    let exePath = findExe(tokens[0])
+    let head = tokens[0]
+    var exePath: string
+    if head.contains('/'):
+      exePath = expandFilename(head)
+      if not fileExists(exePath):
+        exePath = ""
+    else:
+      exePath = findExe(head)
     if exePath.len == 0:
       continue
     var args: seq[string] = @[]
