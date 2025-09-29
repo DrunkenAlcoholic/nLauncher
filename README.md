@@ -21,8 +21,8 @@
 | **Theme preview mode**               | `t:` shows a lightweight preview list of available themes                                                                            |
 | **Fast file search**                 | `s:` searches filesystem using `fd` (or `locate` fallback), typo-tolerant and ranked with match highlighting                         |
 | **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nlauncher.toml`                                                     |
-| **Prefix triggers**                  | `/ …` run shell command • `c: …` open dotfile • `y: …` YouTube • `g: …` Google • `w: …` Wiki • `t:` Theme preview • `s:` File search |
-| **Zero toolkit**                     | Pure Xlib + Xft + [parsetoml](https://github.com/pragmagic/parsetoml)                                                                |
+| **Prefix triggers**                  | `/ …` run shell command • `c: …` open dotfile • `t:` Theme preview • `s:` File search • custom `[[shortcuts]]` (e.g. `g:` → Google) |
+| **Zero toolkit**                     | Pure Xlib + Xft + [parsetoml](https://github.com/NimParsers/parsetoml)                                                                |
 
 ---
 
@@ -65,11 +65,9 @@ nimble release   # produces ./bin/nlauncher
 | *Type letters*        | Instant fuzzy filter (typo-tolerant)                                   |
 | `/ …`                 | Run shell command (everything after the slash is passed to your shell) |
 | `c: …`                | Search `~/.config` for dotfiles and open in your editor                |
-| `y: …`                | Search YouTube in browser                                              |
-| `g: …`                | Google search in browser                                               |
-| `w: …`                | Wikipedia search in browser                                            |
 | `t:`                  | Preview available themes in a quick selection list                     |
 | `s:`                  | Search filesystem for files and open with default application          |
+| `g:, y:, w:, …`       | Example custom shortcuts (configure via `[[shortcuts]]`)               |
 | **Enter**             | Launch item / run command                                              |
 | **Esc**               | Quit                                                                   |
 | **↑ / ↓**             | Navigate list                                                          |
@@ -128,6 +126,38 @@ matchFgColorHex        = "#f8c291"
 last_chosen = "Nord"
 ```
 
+### Custom shortcuts
+
+Define additional prefix triggers by adding `[[shortcuts]]` blocks to the
+config. Each entry accepts a `prefix` (for example `g:`), a `label` displayed
+before the query, a `base` template that can reference `{query}`, and an
+optional `mode`:
+
+```toml
+[[shortcuts]]
+prefix = "yt:"
+label  = "Search YouTube: "
+base   = "https://www.youtube.com/results?search_query={query}"
+mode   = "url"    # default; other values: "shell", "file"
+
+[[shortcuts]]
+prefix = "rg:"
+label  = "ripgrep in repo: "
+base   = "cd ~/code && rg {query}"
+mode   = "shell"
+
+[[shortcuts]]
+prefix = "md:"
+label  = "Open note: "
+base   = "~/notes/{query}.md"
+mode   = "file"
+```
+
+`mode = "shell"` replaces `{query}` with a shell-quoted string before running
+the command. `mode = "file"` expands the path (including `~`) and opens it with
+the default handler; the launcher stays open if the target is missing so you can
+adjust the query.
+
 ---
 
 ## Built-in Themes
@@ -150,4 +180,3 @@ Cobalt • Palenight • Synthwave 84 • Tokyo Night Light • Tokyo Night • 
 
 © 2025 DrunkenAlcoholic — MIT License\
 Enjoy launching at ludicrous speed! 🚀
-

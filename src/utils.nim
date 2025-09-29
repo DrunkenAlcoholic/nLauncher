@@ -98,8 +98,19 @@ proc openPathWithDefault*(path: string): bool =
   var envCandidates: seq[(string, seq[string])] = @[]
   for envName in ["VISUAL", "EDITOR"]:
     let ed = getEnv(envName)
-    if ed.len > 0 and findExe(ed).len > 0:
-      envCandidates.add((ed, @[abs]))
+    if ed.len == 0:
+      continue
+    let tokens = tokenize(ed)
+    if tokens.len == 0:
+      continue
+    let exePath = findExe(tokens[0])
+    if exePath.len == 0:
+      continue
+    var args: seq[string] = @[]
+    if tokens.len > 1:
+      args = tokens[1 ..< tokens.len]
+    args.add abs
+    envCandidates.add((exePath, args))
   if tryStart(envCandidates):
     return true
 
@@ -114,6 +125,18 @@ proc openPathWithDefault*(path: string): bool =
 
   false
 
+## Open files or directories, falling back to xdg-open when needed.
+proc openPathWithFallback*(path: string): bool =
+  let resolved = path.expandTilde()
+  if openPathWithDefault(resolved): return true
+  if dirExists(resolved) or fileExists(resolved):
+    try:
+      discard startProcess("/usr/bin/env", args = @["xdg-open", resolved], options = {poDaemon})
+      return true
+    except CatchableError:
+      discard
+  false
+
 ## True if an executable can be found in $PATH (or is a path that exists).
 proc whichExists*(name: string): bool =
   if name.len == 0: return false
@@ -123,8 +146,10 @@ proc whichExists*(name: string): bool =
 ## Pick a terminal emulator: prefer config.terminalExe, then $TERMINAL, then fallbacks.
 proc chooseTerminal*(): string =
   ## Prefer configured terminal when it exists; else known fallbacks.
-  if config.terminalExe.len > 0 and whichExists(config.terminalExe):
-    return config.terminalExe
+  if config.terminalExe.len > 0:
+    let tokens = tokenize(config.terminalExe)
+    if tokens.len > 0 and whichExists(tokens[0]):
+      return config.terminalExe
   let envTerm = getEnv("TERMINAL")
   if envTerm.len > 0:
     let tokens = tokenize(envTerm)

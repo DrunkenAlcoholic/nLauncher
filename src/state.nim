@@ -49,16 +49,24 @@ type
       borderColor*: culong
 
 type
+  ShortcutMode* = enum
+    smUrl,    # open base with URL-encoded query
+    smShell,  # run base as a shell command
+    smFile    # treat base as a filesystem path
+
+  ## User-configurable prefix shortcut.
+  Shortcut* = object
+    prefix*, label*, base*: string
+    mode*: ShortcutMode
+
   ## What kind of thing the user can pick.
   ActionKind* = enum
-    akApp,     # a real .desktop application
-    akRun,     # a `/…` shell command
-    akConfig,  # `c:` file under ~/.config
-    akFile,    # `s:` file search (open with default app)
-    akYouTube, # `y:` YouTube search
-    akGoogle,  # `g:` Google search
-    akWiki,    # `w:` Wiki search
-    akTheme    # `t:` Theme selector
+    akApp,       # a real .desktop application
+    akRun,       # a `/…` shell command
+    akConfig,    # `c:` file under ~/.config
+    akFile,      # `s:` file search (open with default app)
+    akShortcut,  # configurable shortcut (URL/shell/file)
+    akTheme      # `t:` Theme selector
 
 
   ## A single selectable entry in the launcher.
@@ -67,6 +75,7 @@ type
     label*: string       # what gets drawn (e.g. "Firefox" or "Run: ls")
     exec*: string        # what actually gets executed or opened
     appData*: DesktopApp # optional for akApp; empty for other kinds
+    shortcutMode*: ShortcutMode = smUrl
 
   ## Theme definition (matchFgColorHex is explicit; no "auto" support).
   Theme* = object
@@ -99,6 +108,7 @@ var
   seenMapNotify*: bool = false      ## swallow first FocusOut after map
   themeList*: seq[Theme]
   matchSpans*: seq[seq[(int, int)]] ## per row: (start,len) spans to highlight
+  shortcuts*: seq[Shortcut]
 
 # ── Constants ───────────────────────────────────────────────────────────
 const
@@ -140,6 +150,33 @@ program = "gnome-terminal"        # Terminal emulator for slash commands (/ ...)
 
 [border]
 width = 2                         # Border thickness in pixels (0 = no border)
+
+# ==========================
+# Shortcuts
+# ==========================
+# Define custom prefix triggers. Each shortcut supports:
+#   prefix  = letters ending with ':' (e.g., "g:")
+#   label   = text shown before your query in the results list
+#   base    = template containing optional {query} placeholder
+#   mode    = "url" (default), "shell", or "file"
+
+[[shortcuts]]
+prefix = "g:"
+label  = "Search Google: "
+base   = "https://www.google.com/search?q={query}"
+mode   = "url"
+
+[[shortcuts]]
+prefix = "w:"
+label  = "Search Wiki: "
+base   = "https://en.wikipedia.org/wiki/Special:Search?search={query}"
+mode   = "url"
+
+[[shortcuts]]
+prefix = "y:"
+label  = "Search YouTube: "
+base   = "https://www.youtube.com/results?search_query={query}"
+mode   = "url"
 
 # ==========================
 # Themes

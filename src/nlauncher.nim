@@ -247,6 +247,15 @@ proc cycleTheme*(cfg: var Config) =
   saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
 
 # ── Applications discovery (.desktop) ───────────────────────────────────
+proc newestDesktopMtime(dir: string): int64 =
+  ## Return the newest modification time among *.desktop files under *dir*.
+  if not dirExists(dir): return 0
+  var newest = 0'i64
+  for path in walkFiles(dir / "*.desktop"):
+    let m = times.toUnix(getLastModificationTime(path))
+    if m > newest: newest = m
+  newest
+
 proc loadApplications() =
   ## Scan .desktop files with caching to ~/.cache/nlauncher/apps.json.
   let usrDir   = "/usr/share/applications"
@@ -254,8 +263,8 @@ proc loadApplications() =
   let cacheDir = getHomeDir() / ".cache" / "nlauncher"
   let cacheFile = cacheDir / "apps.json"
 
-  let usrM = if dirExists(usrDir): times.toUnix(getLastModificationTime(usrDir)) else: 0'i64
-  let locM = if dirExists(locDir): times.toUnix(getLastModificationTime(locDir)) else: 0'i64
+  let usrM = newestDesktopMtime(usrDir)
+  let locM = newestDesktopMtime(locDir)
 
   if fileExists(cacheFile):
     try:
@@ -383,6 +392,27 @@ proc initLauncherConfig() =
         )
     except CatchableError:
       echo "nLauncher warning: ignoring invalid [[themes]] entries in ", cfgPath
+
+  # shortcuts
+  shortcuts = @[]
+  if tbl.hasKey("shortcuts"):
+    try:
+      for scVal in tbl["shortcuts"].getElems():
+        let scTbl = scVal.getTable()
+        let prefix = scTbl.getOrDefault("prefix").getStr("").strip()
+        let base = scTbl.getOrDefault("base").getStr("").strip()
+        if prefix.len == 0 or base.len == 0:
+          continue
+        let label = scTbl.getOrDefault("label").getStr("").strip()
+        let modeStr = scTbl.getOrDefault("mode").getStr("url").toLowerAscii
+        var mode = smUrl
+        case modeStr
+        of "shell": mode = smShell
+        of "file": mode = smFile
+        else: discard
+        shortcuts.add Shortcut(prefix: prefix, label: label, base: base, mode: mode)
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [[shortcuts]] entries in ", cfgPath
 
   # last_chosen (case-insensitive match; fallback to first theme)
   var lastName = ""
@@ -529,31 +559,23 @@ proc scoreMatch(q, t, fullPath, home: string): int =
     elif lt.startsWith(lq): s += 400
   s
 
-# ── Web shortcuts ───────────────────────────────────────────────────────
-type WebSpec = tuple[prefix, label, base: string; kind: ActionKind]
-const webSpecs: array[3, WebSpec] = [
-  ("y:", "Search YouTube: ", "https://www.youtube.com/results?search_query=", akYouTube),
-  ("g:", "Search Google: ", "https://www.google.com/search?q=", akGoogle),
-  ("w:", "Search Wiki: ", "https://en.wikipedia.org/wiki/Special:Search?search=", akWiki)
-]
-
 type CmdKind = enum
   ## Recognised input prefixes.
   ckNone,        # no special prefix
   ckTheme,       # `t:`
   ckConfig,      # `c:`
   ckSearch,      # `s:` fast file search
-  ckWeb,         # `y:`, `g:`, `w:`
+  ckShortcut,    # custom shortcuts (e.g. g:, w:, y:)
   ckRun          # raw `/` command
 
 proc parseCommand(inputText: string): (CmdKind, string, int) =
-  ## Parse *inputText* and return the command kind, remainder, and web spec index.
+  ## Parse *inputText* and return the command kind, remainder, and shortcut index.
   var rest: string
   if takePrefix(inputText, "c:", rest): return (ckConfig, rest, -1)
   if takePrefix(inputText, "t:", rest): return (ckTheme, rest, -1)
   if takePrefix(inputText, "s:", rest): return (ckSearch, rest, -1)
-  for i, spec in webSpecs:
-    if takePrefix(inputText, spec.prefix, rest): return (ckWeb, rest, i)
+  for i, sc in shortcuts:
+    if takePrefix(inputText, sc.prefix, rest): return (ckShortcut, rest, i)
   if not inputText.startsWith("/"): return (ckNone, inputText, -1)
   if takePrefix(inputText, "/t", rest): return (ckTheme, rest, -1) # legacy alias
   discard takePrefix(inputText, "/", rest)
@@ -564,12 +586,36 @@ proc visibleQuery(inputText: string): string =
   let (_, rest, _) = parseCommand(inputText)
   rest
 
+proc substituteQuery(pattern, value: string): string =
+  ## Replace `{query}` placeholder or append value if absent.
+  if pattern.contains("{query}"):
+    result = pattern.replace("{query}", value)
+  else:
+    result = pattern & value
+
+proc shortcutLabel(sc: Shortcut; query: string): string =
+  ## Compose UI label for a shortcut result.
+  if sc.label.len > 0:
+    result = sc.label & query
+  else:
+    result = query
+
+proc shortcutExec(sc: Shortcut; query: string): string =
+  ## Build the execution string for a shortcut before mode-specific handling.
+  case sc.mode
+  of smUrl:
+    result = substituteQuery(sc.base, encodeUrl(query))
+  of smShell:
+    result = substituteQuery(sc.base, shellQuote(query))
+  of smFile:
+    result = substituteQuery(sc.base, query)
+
 # ── Build actions & mirror to filteredApps ─────────────────────────────
 proc buildActions() =
   ## Populate `actions` based on `inputText`; mirror to GUI lists/spans.
   actions.setLen(0)
 
-  let (cmd, rest, webIdx) = parseCommand(inputText)
+  let (cmd, rest, shortcutIdx) = parseCommand(inputText)
   var handled = true
 
   case cmd
@@ -583,11 +629,13 @@ proc buildActions() =
     for a in scanConfigFiles(rest):
       actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
 
-  of ckWeb:
-    let spec = webSpecs[webIdx]
-    actions.add Action(kind: spec.kind,
-                       label: spec.label & rest,
-                       exec: spec.base & encodeUrl(rest))
+  of ckShortcut:
+    if shortcutIdx >= 0 and shortcutIdx < shortcuts.len:
+      let sc = shortcuts[shortcutIdx]
+      actions.add Action(kind: akShortcut,
+                         label: shortcutLabel(sc, rest),
+                         exec: shortcutExec(sc, rest),
+                         shortcutMode: sc.mode)
 
   of ckSearch:
     # Debounce heavy file scans while user is typing quickly.
@@ -726,14 +774,8 @@ proc buildActions() =
       matchSpans.add @[]
     else:
       case act.kind
-      of akApp, akConfig, akTheme, akFile:
+      of akApp, akConfig, akTheme, akFile, akShortcut:
         matchSpans.add subseqSpans(q, act.label)
-      of akYouTube, akGoogle, akWiki:
-        let off = max(0, act.label.len - q.len)
-        let seg = if off < act.label.len: act.label[off .. ^1] else: ""
-        var spansAbs: seq[(int, int)] = @[]
-        for (s, l) in subseqSpans(q, seg): spansAbs.add (off + s, l)
-        matchSpans.add spansAbs
       of akRun:
         const prefix = "Run: "
         let off = if act.label.len >= prefix.len: prefix.len else: 0
@@ -751,13 +793,10 @@ proc performAction(a: Action) =
   case a.kind
   of akRun:
     runCommand(a.exec)
-  of akYouTube, akGoogle, akWiki:
-    openUrl(a.exec)
   of akConfig:
     discard startProcess("/bin/sh", args = ["-c", a.exec], options = {poDaemon})
   of akFile:
-    if not openPathWithDefault(a.exec):
-      discard startProcess("/usr/bin/env", args = @["xdg-open", a.exec], options = {poDaemon})
+    discard openPathWithFallback(a.exec)
   of akApp:
     # safer: strip .desktop field codes before launching
     let sanitized = parser.stripFieldCodes(a.exec).strip()
@@ -767,6 +806,20 @@ proc performAction(a: Action) =
     recentApps.insert(a.label, 0)
     if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
     saveRecent()
+  of akShortcut:
+    case a.shortcutMode
+    of smUrl:
+      openUrl(a.exec)
+    of smShell:
+      runCommand(a.exec)
+    of smFile:
+      let expanded = a.exec.expandTilde()
+      if not fileExists(expanded) and not dirExists(expanded):
+        gui.notifyStatus("Not found: " & shortenPath(expanded, 50), 1600)
+        exitAfter = false
+      elif not openPathWithFallback(expanded):
+        gui.notifyStatus("Failed to open: " & shortenPath(expanded, 50), 1600)
+        exitAfter = false
   of akTheme:
     ## Apply and persist, but DO NOT reset selection or exit.
     applyThemeAndColors(config, a.exec)
