@@ -29,7 +29,7 @@
 
 ## Building & Running
 
-> **Skip this if you use the pre-built binary** from the [latest release](https://github.com/DrunkenAlcoholic/NimLaunch/releases).
+> **Skip this if you use the pre-built binary** from the [latest release](https://github.com/DrunkenAlcoholic/NimLaunch/releases) — just make sure your system has `libX11` and `libXft` installed.
 
 ### Dependencies
 
@@ -44,6 +44,8 @@
   ```bash
   nimble install parsetoml x11
   ```
+
+> Runtime requirement: even when using the prebuilt binary, NimLaunch needs the shared libraries from `libX11` and `libXft` available on your system.
 
 ### Build
 
