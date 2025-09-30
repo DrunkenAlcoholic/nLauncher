@@ -40,12 +40,13 @@
 - **X11 headers** & **Xft**:
   - Arch/Manjaro: `sudo pacman -S libx11 libxft`
   - Debian/Ubuntu: `sudo apt install libx11-dev libxft-dev`
+- **Wayland note**: NimLaunch renders through XWayland, so keep the `xorg-xwayland` (or distro equivalent) package installed alongside the X11 libs above.
 - **Nimble packages**:
   ```bash
   nimble install parsetoml x11
   ```
 
-> Runtime requirement: even when using the prebuilt binary, NimLaunch needs the shared libraries from `libX11` and `libXft` available on your system.
+> Runtime requirement: even when using the prebuilt binary, NimLaunch needs the shared libraries from `libX11` and `libXft` available (Wayland sessions still require XWayland plus those libs).
 
 ### Build
 
