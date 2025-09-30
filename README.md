@@ -22,7 +22,7 @@
 | **Fast file search**                 | `s:` searches filesystem using `fd` (or `locate` fallback), typo-tolerant and ranked with match highlighting                         |
 | **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nlauncher.toml`                                                     |
 | **Power actions**                    | `p:` (configurable) shows shutdown/reboot/logout entries sourced from the TOML                                                       |
-| **Prefix triggers**                  | `r: …` run shell command • `c: …` open dotfile • `t:` Theme preview • `s:` File search • custom `[[shortcuts]]` (e.g. `g:` → Google) |
+| **Prefix triggers**                  | `r: …` or `!…` run shell command • `c: …` open dotfile • `t:` Theme preview • `s:` File search • custom `[[shortcuts]]` (e.g. `g:` → Google) |
 | **Zero toolkit**                     | Pure Xlib + Xft + [parsetoml](https://github.com/NimParsers/parsetoml)                                                                |
 
 ---
@@ -51,6 +51,7 @@
 git clone https://github.com/DrunkenAlcoholic/nLauncher.git
 cd nLauncher
 nimble release   # produces ./bin/nlauncher
+./bin/nlauncher   # launch nLauncher
 ```
 
 ### Command-line flags
@@ -170,10 +171,18 @@ base   = "~/notes/{query}.md"
 mode   = "file"
 ```
 
+Prefixes `c:`, `p:`, `r:`/`!`, `s:`, and `t:` are built in; use other prefixes for your custom entries.
+
 `mode = "shell"` replaces `{query}` with a shell-quoted string before running
 the command. `mode = "file"` expands the path (including `~`) and opens it with
 the default handler; the launcher stays open if the target is missing so you can
 adjust the query.
+
+### Run commands
+
+Use the built-in `r:` prefix (or bare `!`) for quick shell commands. The query after
+the prefix is sent to your configured terminal (falling back to `/bin/sh` when no
+terminal is available).
 
 ### Power actions
 
