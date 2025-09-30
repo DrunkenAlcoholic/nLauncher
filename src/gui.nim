@@ -248,7 +248,7 @@ proc initGui*() =
         cast[Pcuchar](addr mwmHints), mwmHints.len.cint
       )
 
-    discard XStoreName(display, window, "nLauncher")
+    discard XStoreName(display, window, "NimLaunch")
     discard XSelectInput(
       display, window,
       ExposureMask or KeyPressMask or

@@ -1,4 +1,4 @@
-# nLauncher
+# NimLaunch
 
 > A lightning-fast, X11-native application and command launcher written in Nim.\
 > Minimal dependencies, zero toolkit bloat, instant fuzzy search, and rich theming.
@@ -20,7 +20,7 @@
 | **Live theme cycling & persistence** | Press F5 to cycle themes; saves your last choice in the TOML config                                                                  |
 | **Theme preview mode**               | `t:` shows a lightweight preview list of available themes                                                                            |
 | **Fast file search**                 | `s:` searches filesystem using `fd` (or `locate` fallback), typo-tolerant and ranked with match highlighting                         |
-| **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nlauncher.toml`                                                     |
+| **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nimlaunch.toml`                                                     |
 | **Power actions**                    | `p:` (configurable) shows shutdown/reboot/logout entries sourced from the TOML                                                       |
 | **Prefix triggers**                  | `r: …` or `!…` run shell command • `c: …` open dotfile • `t:` Theme preview • `s:` File search • custom `[[shortcuts]]` (e.g. `g:` → Google) |
 | **Zero toolkit**                     | Pure Xlib + Xft + [parsetoml](https://github.com/NimParsers/parsetoml)                                                                |
@@ -29,11 +29,11 @@
 
 ## Building & Running
 
-> **Skip this if you use the pre-built binary** from the latest release.
+> **Skip this if you use the pre-built binary** from the [latest release](https://github.com/DrunkenAlcoholic/NimLaunch/releases).
 
 ### Dependencies
 
-- **Nim**: install via the recommended [choosenim](https://nim-lang.org/choosenim) script:
+- **Nim**: install via the recommended [choosenim](https://nim-lang.org/install_unix.html) script:
   ```bash
   curl https://nim-lang.org/choosenim/init.sh -sSf | sh
   ```
@@ -48,10 +48,10 @@
 ### Build
 
 ```bash
-git clone https://github.com/DrunkenAlcoholic/nLauncher.git
-cd nLauncher
-nimble release   # produces ./bin/nlauncher
-./bin/nlauncher   # launch nLauncher
+git clone https://github.com/DrunkenAlcoholic/NimLaunch.git
+cd NimLaunch
+nimble release   # produces ./bin/nimlaunch
+./bin/nimlaunch   # launch NimLaunch
 ```
 
 ### Command-line flags
@@ -84,16 +84,16 @@ nimble release   # produces ./bin/nlauncher
 
 ## Configuration
 
-The first time you run `nlauncher`, it creates:
+The first time you run `nimlaunch`, it creates:
 
 ```
-~/.config/nlauncher/nlauncher.toml
+~/.config/nimlaunch/nimlaunch.toml
 ```
 
 Example configuration:
 
 ```toml
-# nlauncher.toml
+# nimlaunch.toml
 
 [window]
 width               = 500
@@ -193,7 +193,7 @@ lock screen, etc.) behind a dedicated prefix (default `p:`). Each entry accepts:
 - `command` → shell command executed when selected (runs via `/bin/sh -c`).
 - `mode` *(optional)* → `spawn` (default) launches in the background, `terminal`
   opens the configured terminal and runs the command there.
-- `stay_open` *(optional)* → keep nLauncher open after executing (default: close).
+- `stay_open` *(optional)* → keep NimLaunch open after executing (default: close).
 
 Override the prefix by setting `[power].prefix = "x:"` (or leave empty to
 disable the trigger entirely).

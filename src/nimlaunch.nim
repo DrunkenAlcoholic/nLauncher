@@ -1,4 +1,4 @@
-## nLauncher.nim — main program
+## nimlaunch.nim — main program
 ## MIT; see LICENSE for details.
 
 # ── Imports ─────────────────────────────────────────────────────────────
@@ -256,7 +256,7 @@ proc cycleTheme*(cfg: var Config) =
   currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
   let th = themeList[currentThemeIndex]
   applyThemeAndColors(cfg, th.name)
-  saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
+  saveLastTheme(getHomeDir() / ".config" / "nimlaunch" / "nimlaunch.toml")
 
 # ── Applications discovery (.desktop) ───────────────────────────────────
 proc newestDesktopMtime(dir: string): int64 =
@@ -269,10 +269,10 @@ proc newestDesktopMtime(dir: string): int64 =
   newest
 
 proc loadApplications() =
-  ## Scan .desktop files with caching to ~/.cache/nlauncher/apps.json.
+  ## Scan .desktop files with caching to ~/.cache/nimlaunch/apps.json.
   let usrDir   = "/usr/share/applications"
   let locDir   = getHomeDir() / ".local/share/applications"
-  let cacheDir = getHomeDir() / ".cache" / "nlauncher"
+  let cacheDir = getHomeDir() / ".cache" / "nimlaunch"
   let cacheFile = cacheDir / "apps.json"
 
   let usrM = newestDesktopMtime(usrDir)
@@ -335,7 +335,7 @@ proc loadShortcutsSection(tbl: toml.TomlValueRef; cfgPath: string) =
 
       shortcuts.add Shortcut(prefix: prefix, label: label, base: base, mode: mode)
   except CatchableError:
-    echo "nLauncher warning: ignoring invalid [[shortcuts]] entries in ", cfgPath
+    echo "NimLaunch warning: ignoring invalid [[shortcuts]] entries in ", cfgPath
 
 proc loadPowerSection(tbl: toml.TomlValueRef; cfgPath: string) =
   ## Populate power prefix and `state.powerActions` from *tbl*.
@@ -348,7 +348,7 @@ proc loadPowerSection(tbl: toml.TomlValueRef; cfgPath: string) =
       if config.powerPrefix.len > 0 and not config.powerPrefix.endsWith(":"):
         config.powerPrefix &= ":"
     except CatchableError:
-      echo "nLauncher warning: ignoring invalid [power] section in ", cfgPath
+      echo "NimLaunch warning: ignoring invalid [power] section in ", cfgPath
 
   if not tbl.hasKey("power_actions"): return
 
@@ -374,7 +374,7 @@ proc loadPowerSection(tbl: toml.TomlValueRef; cfgPath: string) =
                                    mode: mode,
                                    stayOpen: stayOpen)
   except CatchableError:
-    echo "nLauncher warning: ignoring invalid [[power_actions]] entries in ", cfgPath
+    echo "NimLaunch warning: ignoring invalid [[power_actions]] entries in ", cfgPath
 
 # ── Load & apply config from TOML ───────────────────────────────────────
 proc initLauncherConfig() =
@@ -398,8 +398,8 @@ proc initLauncherConfig() =
   config.powerPrefix = "p:"
 
   ## Ensure TOML exists
-  let cfgDir = getHomeDir() / ".config" / "nlauncher"
-  let cfgPath = cfgDir / "nlauncher.toml"
+  let cfgDir = getHomeDir() / ".config" / "nimlaunch"
+  let cfgPath = cfgDir / "nimlaunch.toml"
   if not fileExists(cfgPath):
     createDir(cfgDir)
     writeFile(cfgPath, defaultToml)
@@ -419,7 +419,7 @@ proc initLauncherConfig() =
       config.positionY = w.getOrDefault("position_y").getInt(config.positionY)
       config.verticalAlign = w.getOrDefault("vertical_align").getStr(config.verticalAlign)
     except CatchableError:
-      echo "nLauncher warning: ignoring invalid [window] section in ", cfgPath
+      echo "NimLaunch warning: ignoring invalid [window] section in ", cfgPath
 
   ## font
   if tbl.hasKey("font"):
@@ -427,7 +427,7 @@ proc initLauncherConfig() =
       let f = tbl["font"].getTable()
       config.fontName = f.getOrDefault("fontname").getStr(config.fontName)
     except CatchableError:
-      echo "nLauncher warning: ignoring invalid [font] section in ", cfgPath
+      echo "NimLaunch warning: ignoring invalid [font] section in ", cfgPath
 
   ## input
   if tbl.hasKey("input"):
@@ -436,7 +436,7 @@ proc initLauncherConfig() =
       config.prompt = inp.getOrDefault("prompt").getStr(config.prompt)
       config.cursor = inp.getOrDefault("cursor").getStr(config.cursor)
     except CatchableError:
-      echo "nLauncher warning: ignoring invalid [input] section in ", cfgPath
+      echo "NimLaunch warning: ignoring invalid [input] section in ", cfgPath
 
   ## terminal
   if tbl.hasKey("terminal"):
@@ -444,7 +444,7 @@ proc initLauncherConfig() =
       let term = tbl["terminal"].getTable()
       config.terminalExe = term.getOrDefault("program").getStr(config.terminalExe)
     except CatchableError:
-      echo "nLauncher warning: ignoring invalid [terminal] section in ", cfgPath
+      echo "NimLaunch warning: ignoring invalid [terminal] section in ", cfgPath
 
   ## border
   if tbl.hasKey("border"):
@@ -452,7 +452,7 @@ proc initLauncherConfig() =
       let b = tbl["border"].getTable()
       config.borderWidth = b.getOrDefault("width").getInt(config.borderWidth)
     except CatchableError:
-      echo "nLauncher warning: ignoring invalid [border] section in ", cfgPath
+      echo "NimLaunch warning: ignoring invalid [border] section in ", cfgPath
 
   ## themes
   themeList = @[]
@@ -470,7 +470,7 @@ proc initLauncherConfig() =
           matchFgColorHex: th.getOrDefault("matchFgColorHex").getStr("")
         )
     except CatchableError:
-      echo "nLauncher warning: ignoring invalid [[themes]] entries in ", cfgPath
+      echo "NimLaunch warning: ignoring invalid [[themes]] entries in ", cfgPath
 
   loadShortcutsSection(tbl, cfgPath)
   loadPowerSection(tbl, cfgPath)
@@ -482,7 +482,7 @@ proc initLauncherConfig() =
       let themeTbl = tbl["theme"].getTable()
       lastName = themeTbl.getOrDefault("last_chosen").getStr("")
     except CatchableError:
-      echo "nLauncher warning: ignoring invalid [theme] section in ", cfgPath
+      echo "NimLaunch warning: ignoring invalid [theme] section in ", cfgPath
   var pickedIndex = -1
   if lastName.len > 0:
     for i, th in themeList:
@@ -491,7 +491,7 @@ proc initLauncherConfig() =
         break
   if pickedIndex < 0:
     if themeList.len > 0: pickedIndex = 0
-    else: quit("nLauncher error: no themes defined in nlauncher.toml")
+    else: quit("NimLaunch error: no themes defined in nimlaunch.toml")
 
   let chosen = themeList[pickedIndex].name
   config.themeName = chosen
@@ -926,7 +926,7 @@ proc performAction(a: Action) =
   of akTheme:
     ## Apply and persist, but DO NOT reset selection or exit.
     applyThemeAndColors(config, a.exec)
-    saveLastTheme(getHomeDir() / ".config" / "nlauncher" / "nlauncher.toml")
+    saveLastTheme(getHomeDir() / ".config" / "nimlaunch" / "nimlaunch.toml")
     exitAfter = false
   of akPlaceholder:
     exitAfter = false

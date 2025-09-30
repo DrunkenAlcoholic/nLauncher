@@ -17,7 +17,7 @@ type
     name*, exec*: string
     hasIcon*: bool
 
-  ## Payload cached to `~/.cache/nlauncher/apps.json`.
+  ## Payload cached to `~/.cache/nimlaunch/apps.json`.
   CacheData* = object
     usrMtime*, localMtime*: int64
     apps*: seq[DesktopApp]
@@ -139,11 +139,11 @@ const
 # ── Defaults as TOML text ───────────────────────────────────────────────
 const defaultToml* = """
 # ==========================
-# nLauncher Configuration
+# NimLaunch Configuration
 # ==========================
-# This file controls how nLauncher looks and behaves.
+# This file controls how NimLaunch looks and behaves.
 # All settings are optional — if removed, defaults will be used.
-# Edit values, save, and restart nLauncher to apply changes.
+# Edit values, save, and restart NimLaunch to apply changes.
 # Colors must be in HEX format (e.g., "#RRGGBB").
 
 [window]
@@ -163,7 +163,7 @@ cursor = "_"                      # Cursor character displayed after query text
 
 [terminal]
 program = "gnome-terminal"        # Terminal emulator for slash commands (/ ...)
-                                  # If not found, nLauncher will fall back to a default
+                                  # If not found, NimLaunch will fall back to a default
 
 [border]
 width = 2                         # Border thickness in pixels (0 = no border)

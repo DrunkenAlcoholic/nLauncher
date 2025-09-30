@@ -177,7 +177,7 @@ template timeIt*(msg: string; body: untyped) =
     echo msg, " ", elapsed.formatFloat(ffDecimal, 3), " ms"
 
 # ── Recent/MRU (applications) persistence ───────────────────────────────
-let recentFile* = getHomeDir() / ".cache" / "nlauncher" / "recent.json"
+let recentFile* = getHomeDir() / ".cache" / "nimlaunch" / "recent.json"
 
 proc loadRecent*() =
   ## Populate state.recentApps from disk; log on error.
