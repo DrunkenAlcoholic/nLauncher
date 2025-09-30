@@ -43,6 +43,7 @@ type
     fontName*: string
     themeName*: string
     terminalExe*: string     ## preferred terminal program
+    powerPrefix*: string     ## input prefix for power/system actions
 
     # Resolved X pixel colours (set once the X connection is live) -------
     bgColor*, fgColor*, highlightBgColor*, highlightFgColor*,
@@ -59,6 +60,17 @@ type
     prefix*, label*, base*: string
     mode*: ShortcutMode
 
+  PowerActionMode* = enum
+    pamSpawn,    # execute via background shell
+    pamTerminal  # run inside configured terminal
+
+  ## Configurable system/power action.
+  PowerAction* = object
+    label*: string
+    command*: string
+    mode*: PowerActionMode
+    stayOpen*: bool
+
   ## What kind of thing the user can pick.
   ActionKind* = enum
     akApp,       # a real .desktop application
@@ -67,6 +79,7 @@ type
     akFile,      # `s:` file search (open with default app)
     akShortcut,  # configurable shortcut (URL/shell/file)
     akTheme,     # `t:` Theme selector
+    akPower,     # power/system management entries
     akPlaceholder
 
 
@@ -77,6 +90,8 @@ type
     exec*: string        # what actually gets executed or opened
     appData*: DesktopApp # optional for akApp; empty for other kinds
     shortcutMode*: ShortcutMode = smUrl
+    powerMode*: PowerActionMode = pamSpawn
+    stayOpen*: bool = false
 
   ## Theme definition (matchFgColorHex is explicit; no "auto" support).
   Theme* = object
@@ -110,6 +125,7 @@ var
   themeList*: seq[Theme]
   matchSpans*: seq[seq[(int, int)]] ## per row: (start,len) spans to highlight
   shortcuts*: seq[Shortcut]
+  powerActions*: seq[PowerAction]
 
 # ── Constants ───────────────────────────────────────────────────────────
 const
@@ -178,6 +194,36 @@ prefix = "y:"
 label  = "Search YouTube: "
 base   = "https://www.youtube.com/results?search_query={query}"
 mode   = "url"
+
+# ==========================
+# Run commands
+# ==========================
+# Use `r:` (or `!`) to execute shell commands directly without a custom shortcut.
+
+# ==========================
+# Power actions
+# ==========================
+# Configure system commands exposed under the `p:` prefix (customisable).
+# `mode` accepts "spawn" (background shell) or "terminal" (runs inside
+# your configured terminal). `stay_open = true` keeps the launcher visible.
+
+[power]
+prefix = "p:"
+
+[[power_actions]]
+label   = "Shutdown"
+command = "systemctl poweroff"
+mode    = "spawn"
+
+[[power_actions]]
+label   = "Reboot"
+command = "systemctl reboot"
+mode    = "spawn"
+
+[[power_actions]]
+label       = "Logout"
+command     = "loginctl terminate-user $USER"
+mode        = "spawn"
 
 # ==========================
 # Themes

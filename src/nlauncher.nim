@@ -88,6 +88,15 @@ proc runCommand(cmd: string) =
   let argv = buildTerminalArgs(base, termArgs, shExe, shArgs)
   discard startProcess(exePath, args = argv, options = {poDaemon})
 
+proc spawnShellCommand(cmd: string): bool =
+  ## Execute *cmd* via /bin/sh in the background; return success.
+  try:
+    discard startProcess("/bin/sh", args = ["-c", cmd], options = {poDaemon})
+    true
+  except CatchableError as e:
+    echo "spawnShellCommand failed: ", cmd, " (", e.name, "): ", e.msg
+    false
+
 proc openUrl(url: string) =
   ## Open *url* via xdg-open (no shell involved). Log failures for diagnosis.
   try:
@@ -116,7 +125,7 @@ proc scanFilesFast*(query: string): seq[string] =
   let limit = SearchFdCap
 
   try:
-    # --- Prefer `fd` ----------------------------------------------------
+    ## --- Prefer `fd` ----------------------------------------------------
     let fdExe = findExe("fd")
     if fdExe.len > 0:
       let args = @[
@@ -130,7 +139,7 @@ proc scanFilesFast*(query: string): seq[string] =
         if line.len > 0: result.add(line)
       return
 
-    # --- Fallback: `locate -i` -----------------------------------------
+    ## --- Fallback: `locate -i` -----------------------------------------
     let locExe = findExe("locate")
     if locExe.len > 0:
       let p = startProcess(locExe, args = @["-i", "-l", $limit, query],
@@ -141,7 +150,7 @@ proc scanFilesFast*(query: string): seq[string] =
         if line.len > 0: result.add(line)
       return
 
-    # --- Final fallback: bounded walk under $HOME -----------------------
+    ## --- Final fallback: bounded walk under $HOME -----------------------
     var count = 0
     for path in walkDirRec(home, yieldFilter = {pcFile}):
       if path.toLowerAscii.contains(ql):
@@ -301,12 +310,78 @@ proc loadApplications() =
     except:
       echo "Warning: cache not saved."
 
+# ── Config helpers ───────────────────────────────────────────────────────
+proc loadShortcutsSection(tbl: toml.TomlValueRef; cfgPath: string) =
+  ## Populate `state.shortcuts` from `[[shortcuts]]` entries in *tbl*.
+  shortcuts = @[]
+  if not tbl.hasKey("shortcuts"): return
+
+  try:
+    for scVal in tbl["shortcuts"].getElems():
+      let scTbl = scVal.getTable()
+      let prefix = scTbl.getOrDefault("prefix").getStr("").strip()
+      let base = scTbl.getOrDefault("base").getStr("").strip()
+      if prefix.len == 0 or base.len == 0:
+        continue
+
+      let label = scTbl.getOrDefault("label").getStr("").strip()
+      let modeStr = scTbl.getOrDefault("mode").getStr("url").toLowerAscii
+
+      var mode = smUrl
+      case modeStr
+      of "shell": mode = smShell
+      of "file": mode = smFile
+      else: discard
+
+      shortcuts.add Shortcut(prefix: prefix, label: label, base: base, mode: mode)
+  except CatchableError:
+    echo "nLauncher warning: ignoring invalid [[shortcuts]] entries in ", cfgPath
+
+proc loadPowerSection(tbl: toml.TomlValueRef; cfgPath: string) =
+  ## Populate power prefix and `state.powerActions` from *tbl*.
+  powerActions = @[]
+
+  if tbl.hasKey("power"):
+    try:
+      let p = tbl["power"].getTable()
+      config.powerPrefix = p.getOrDefault("prefix").getStr(config.powerPrefix).strip()
+      if config.powerPrefix.len > 0 and not config.powerPrefix.endsWith(":"):
+        config.powerPrefix &= ":"
+    except CatchableError:
+      echo "nLauncher warning: ignoring invalid [power] section in ", cfgPath
+
+  if not tbl.hasKey("power_actions"): return
+
+  try:
+    for paVal in tbl["power_actions"].getElems():
+      let paTbl = paVal.getTable()
+      let label = paTbl.getOrDefault("label").getStr("").strip()
+      let command = paTbl.getOrDefault("command").getStr("").strip()
+      if label.len == 0 or command.len == 0:
+        continue
+
+      var mode = pamSpawn
+      let modeStr = paTbl.getOrDefault("mode").getStr("spawn").strip().toLowerAscii
+      case modeStr
+      of "terminal": mode = pamTerminal
+      of "spawn", "shell": discard
+      else: discard
+
+      let stayOpen = paTbl.getOrDefault("stay_open").getBool(false)
+
+      powerActions.add PowerAction(label: label,
+                                   command: command,
+                                   mode: mode,
+                                   stayOpen: stayOpen)
+  except CatchableError:
+    echo "nLauncher warning: ignoring invalid [[power_actions]] entries in ", cfgPath
+
 # ── Load & apply config from TOML ───────────────────────────────────────
 proc initLauncherConfig() =
   ## Initialize defaults, read TOML, apply last theme, compute geometry.
   config = Config() # zero-init
 
-  # In-code defaults
+  ## In-code defaults
   config.winWidth = 500
   config.lineHeight = 22
   config.maxVisibleItems = 10
@@ -320,8 +395,9 @@ proc initLauncherConfig() =
   config.terminalExe = "gnome-terminal"
   config.borderWidth = 2
   config.matchFgColorHex = "#f8c291"
+  config.powerPrefix = "p:"
 
-  # Ensure TOML exists
+  ## Ensure TOML exists
   let cfgDir = getHomeDir() / ".config" / "nlauncher"
   let cfgPath = cfgDir / "nlauncher.toml"
   if not fileExists(cfgPath):
@@ -329,10 +405,10 @@ proc initLauncherConfig() =
     writeFile(cfgPath, defaultToml)
     echo "Created default config at ", cfgPath
 
-  # Parse TOML
+  ## Parse TOML
   let tbl = toml.parseFile(cfgPath)
 
-  # window
+  ## window
   if tbl.hasKey("window"):
     try:
       let w = tbl["window"].getTable()
@@ -345,7 +421,7 @@ proc initLauncherConfig() =
     except CatchableError:
       echo "nLauncher warning: ignoring invalid [window] section in ", cfgPath
 
-  # font
+  ## font
   if tbl.hasKey("font"):
     try:
       let f = tbl["font"].getTable()
@@ -353,7 +429,7 @@ proc initLauncherConfig() =
     except CatchableError:
       echo "nLauncher warning: ignoring invalid [font] section in ", cfgPath
 
-  # input
+  ## input
   if tbl.hasKey("input"):
     try:
       let inp = tbl["input"].getTable()
@@ -362,7 +438,7 @@ proc initLauncherConfig() =
     except CatchableError:
       echo "nLauncher warning: ignoring invalid [input] section in ", cfgPath
 
-  # terminal
+  ## terminal
   if tbl.hasKey("terminal"):
     try:
       let term = tbl["terminal"].getTable()
@@ -370,7 +446,7 @@ proc initLauncherConfig() =
     except CatchableError:
       echo "nLauncher warning: ignoring invalid [terminal] section in ", cfgPath
 
-  # border
+  ## border
   if tbl.hasKey("border"):
     try:
       let b = tbl["border"].getTable()
@@ -378,7 +454,7 @@ proc initLauncherConfig() =
     except CatchableError:
       echo "nLauncher warning: ignoring invalid [border] section in ", cfgPath
 
-  # themes
+  ## themes
   themeList = @[]
   if tbl.hasKey("themes"):
     try:
@@ -396,28 +472,10 @@ proc initLauncherConfig() =
     except CatchableError:
       echo "nLauncher warning: ignoring invalid [[themes]] entries in ", cfgPath
 
-  # shortcuts
-  shortcuts = @[]
-  if tbl.hasKey("shortcuts"):
-    try:
-      for scVal in tbl["shortcuts"].getElems():
-        let scTbl = scVal.getTable()
-        let prefix = scTbl.getOrDefault("prefix").getStr("").strip()
-        let base = scTbl.getOrDefault("base").getStr("").strip()
-        if prefix.len == 0 or base.len == 0:
-          continue
-        let label = scTbl.getOrDefault("label").getStr("").strip()
-        let modeStr = scTbl.getOrDefault("mode").getStr("url").toLowerAscii
-        var mode = smUrl
-        case modeStr
-        of "shell": mode = smShell
-        of "file": mode = smFile
-        else: discard
-        shortcuts.add Shortcut(prefix: prefix, label: label, base: base, mode: mode)
-    except CatchableError:
-      echo "nLauncher warning: ignoring invalid [[shortcuts]] entries in ", cfgPath
+  loadShortcutsSection(tbl, cfgPath)
+  loadPowerSection(tbl, cfgPath)
 
-  # last_chosen (case-insensitive match; fallback to first theme)
+  ## last_chosen (case-insensitive match; fallback to first theme)
   var lastName = ""
   if tbl.hasKey("theme"):
     try:
@@ -443,7 +501,7 @@ proc initLauncherConfig() =
   if chosen != lastName:
     saveLastTheme(cfgPath)
 
-  # derived geometry
+  ## derived geometry
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
 
 # ── Fuzzy match + helpers ───────────────────────────────────────────────
@@ -496,7 +554,7 @@ proc scoreMatch(q, t, fullPath, home: string): int =
   let lt = t.toLowerAscii
   let pos = lt.find(lq)
 
-  # fast helpers (no alloc)
+  ## fast helpers (no alloc)
   proc withinOneEdit(a, b: string): bool =
     let m = a.len; let n = b.len
     if abs(m - n) > 1: return false
@@ -518,7 +576,6 @@ proc scoreMatch(q, t, fullPath, home: string): int =
     if k >= a.len - 1: return false
     if not (a[k] == b[k+1] and a[k+1] == b[k]): return false
     let tailStart = k + 2
-    #if tailStart < a.len: a[tailStart .. ^1] == b[tailStart .. ^1] else: true
     result = if tailStart < a.len:
       a[tailStart .. ^1] == b[tailStart .. ^1]
     else:
@@ -568,8 +625,9 @@ type CmdKind = enum
   ckTheme,       # `t:`
   ckConfig,      # `c:`
   ckSearch,      # `s:` fast file search
+  ckPower,       # `p:` system/power actions
   ckShortcut,    # custom shortcuts (e.g. g:, w:, y:)
-  ckRun          # raw `/` command
+  ckRun          # raw `r:` command
 
 proc parseCommand(inputText: string): (CmdKind, string, int) =
   ## Parse *inputText* and return the command kind, remainder, and shortcut index.
@@ -577,12 +635,14 @@ proc parseCommand(inputText: string): (CmdKind, string, int) =
   if takePrefix(inputText, "c:", rest): return (ckConfig, rest, -1)
   if takePrefix(inputText, "t:", rest): return (ckTheme, rest, -1)
   if takePrefix(inputText, "s:", rest): return (ckSearch, rest, -1)
+  if config.powerPrefix.len > 0 and
+     takePrefix(inputText, config.powerPrefix, rest):
+    return (ckPower, rest, -1)
   for i, sc in shortcuts:
     if takePrefix(inputText, sc.prefix, rest): return (ckShortcut, rest, i)
-  if not inputText.startsWith("/"): return (ckNone, inputText, -1)
-  if takePrefix(inputText, "/t", rest): return (ckTheme, rest, -1) # legacy alias
-  discard takePrefix(inputText, "/", rest)
-  (ckRun, rest.strip(), -1)
+  if takePrefix(inputText, "r:", rest) or takePrefix(inputText, "!", rest):
+    return (ckRun, rest.strip(), -1)
+  (ckNone, inputText, -1)
 
 proc visibleQuery(inputText: string): string =
   ## Return the user's query sans command prefix so highlight works.
@@ -640,8 +700,29 @@ proc buildActions() =
                          exec: shortcutExec(sc, rest),
                          shortcutMode: sc.mode)
 
+  of ckPower:
+    if powerActions.len == 0:
+      actions.add Action(kind: akPlaceholder,
+                         label: "No power actions configured",
+                         exec: "")
+    else:
+      let ql = rest.strip().toLowerAscii
+      var matched = 0
+      for pa in powerActions:
+        if ql.len == 0 or pa.label.toLowerAscii.contains(ql):
+          actions.add Action(kind: akPower,
+                             label: pa.label,
+                             exec: pa.command,
+                             powerMode: pa.mode,
+                             stayOpen: pa.stayOpen)
+          inc matched
+      if matched == 0:
+        actions.add Action(kind: akPlaceholder,
+                           label: "No matches",
+                           exec: "")
+
   of ckSearch:
-    # Debounce heavy file scans while user is typing quickly.
+    ## Debounce heavy file scans while user is typing quickly.
     let sinceEdit = gui.nowMs() - lastInputChangeMs
     if rest.len < 2 or sinceEdit < SearchDebounceMs:
       actions.add Action(kind: akPlaceholder, label: "Searching…", exec: "")
@@ -651,7 +732,7 @@ proc buildActions() =
 
       let restLower = rest.toLowerAscii
 
-      # Reuse previous scan results if user is narrowing the query (prefix grow).
+      ## Reuse previous scan results if user is narrowing the query (prefix grow).
       var paths: seq[string]
       if lastSearchQuery.len > 0 and rest.len >= lastSearchQuery.len and
          rest.startsWith(lastSearchQuery) and lastSearchResults.len > 0:
@@ -682,12 +763,12 @@ proc buildActions() =
         let name = p.extractFilename
         var s = scoreMatch(rest, name, p, home)
 
-        # Prefer exact/prefix basename matches heavily
+        ## Prefer exact/prefix basename matches heavily
         let nl = name.toLowerAscii
         if nl == ql: s += 12_000
         elif nl.startsWith(ql): s += 4_000
 
-        # Prefer items under $HOME; penalize outside and very deep paths
+        ## Prefer items under $HOME; penalize outside and very deep paths
         if p.startsWith(home & "/"):
           s += 800
           let dir = p[0 ..< max(0, p.len - name.len)]
@@ -721,12 +802,14 @@ proc buildActions() =
     if rest.len > 0:
       actions.add Action(kind: akRun, label: "Run: " & rest, exec: rest)
     else:
-      handled = false
+      actions.add Action(kind: akPlaceholder,
+                         label: "Run: enter a command",
+                         exec: "")
 
   of ckNone:
     handled = false
 
-  # Default view — app list (MRU first, then fuzzy)
+  ## Default view — app list (MRU first, then fuzzy)
   if not handled:
     if rest.len == 0:
       var index = initTable[string, DesktopApp](allApps.len * 2)
@@ -762,7 +845,7 @@ proc buildActions() =
         let app = allApps[it[1]]
         actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
 
-  # Mirror to filteredApps + highlight spans
+  ## Mirror to filteredApps + highlight spans
   filteredApps = @[]
   matchSpans = @[]
 
@@ -777,7 +860,7 @@ proc buildActions() =
       matchSpans.add @[]
     else:
       case act.kind
-      of akApp, akConfig, akTheme, akFile, akShortcut, akPlaceholder:
+      of akApp, akConfig, akTheme, akFile, akShortcut, akPower, akPlaceholder:
         matchSpans.add subseqSpans(q, act.label)
       of akRun:
         const prefix = "Run: "
@@ -797,18 +880,23 @@ proc performAction(a: Action) =
   of akRun:
     runCommand(a.exec)
   of akConfig:
-    discard startProcess("/bin/sh", args = ["-c", a.exec], options = {poDaemon})
+    if not spawnShellCommand(a.exec):
+      gui.notifyStatus("Failed: " & a.label, 1600)
+      exitAfter = false
   of akFile:
     discard openPathWithFallback(a.exec)
   of akApp:
-    # safer: strip .desktop field codes before launching
+    ## safer: strip .desktop field codes before launching
     let sanitized = parser.stripFieldCodes(a.exec).strip()
-    discard startProcess("/bin/sh", args = ["-c", sanitized], options = {poDaemon})
-    let ri = recentApps.find(a.label)
-    if ri >= 0: recentApps.delete(ri)
-    recentApps.insert(a.label, 0)
-    if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
-    saveRecent()
+    if spawnShellCommand(sanitized):
+      let ri = recentApps.find(a.label)
+      if ri >= 0: recentApps.delete(ri)
+      recentApps.insert(a.label, 0)
+      if recentApps.len > maxRecent: recentApps.setLen(maxRecent)
+      saveRecent()
+    else:
+      gui.notifyStatus("Failed: " & a.label, 1600)
+      exitAfter = false
   of akShortcut:
     case a.shortcutMode
     of smUrl:
@@ -823,6 +911,18 @@ proc performAction(a: Action) =
       elif not openPathWithFallback(expanded):
         gui.notifyStatus("Failed to open: " & shortenPath(expanded, 50), 1600)
         exitAfter = false
+  of akPower:
+    var success = true
+    case a.powerMode
+    of pamSpawn:
+      success = spawnShellCommand(a.exec)
+    of pamTerminal:
+      runCommand(a.exec)
+    if not success:
+      gui.notifyStatus("Failed: " & a.label, 1600)
+      exitAfter = false
+    elif a.stayOpen:
+      exitAfter = false
   of akTheme:
     ## Apply and persist, but DO NOT reset selection or exit.
     applyThemeAndColors(config, a.exec)
@@ -843,8 +943,8 @@ proc main() =
 
   initGui()
 
-  # Theme parsing must happen after initGui opens the display but before the
-  # first redraw so Xft colours resolve correctly.
+  ## Theme parsing must happen after initGui opens the display but before the
+  ## first redraw so Xft colours resolve correctly.
   timeIt "updateParsedColors:": updateParsedColors(config)
   timeIt "updateGuiColors:": gui.updateGuiColors()
   timeIt "Benchmark(Redraw Frame):": gui.redrawWindow()
@@ -853,7 +953,7 @@ proc main() =
 
   while not shouldExit:
     if XPending(display) == 0:
-      # Debounce wake-up: if we're in s: search, rebuild after idle
+      ## Debounce wake-up: if we're in s: search, rebuild after idle
       let (cmd, rest, _) = parseCommand(inputText)
       if cmd == ckSearch:
         let sinceEdit = gui.nowMs() - lastInputChangeMs

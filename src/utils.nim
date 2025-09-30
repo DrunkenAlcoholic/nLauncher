@@ -89,12 +89,12 @@ proc openPathWithDefault*(path: string): bool =
   let abs = absolutePath(path)
   if not fileExists(abs): return false
 
-  # Preferred system openers
+  ## Preferred system openers
   if tryStart(@[(findExe("xdg-open"), @[abs]),
                (findExe("gio"), @["open", abs])]):
     return true
 
-  # Respect user editor preference
+  ## Respect user editor preference
   var envCandidates: seq[(string, seq[string])] = @[]
   for envName in ["VISUAL", "EDITOR"]:
     let ed = getEnv(envName)
@@ -121,7 +121,7 @@ proc openPathWithDefault*(path: string): bool =
   if tryStart(envCandidates):
     return true
 
-  # Fallback shortlist
+  ## Fallback shortlist
   var fallbackCandidates: seq[(string, seq[string])] = @[]
   for ed in ["gedit", "kate", "mousepad", "code", "nano", "vi"]:
     let exe = findExe(ed)

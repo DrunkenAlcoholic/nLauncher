@@ -101,7 +101,7 @@ proc getBaseExec*(exec: string): string =
 
   var idx = 0
 
-  # env VAR=... wrapper
+  ## env VAR=... wrapper
   if toks[0] == "env":
     idx = 1
     while idx < toks.len and isEnvAssign(toks[idx]):
@@ -109,7 +109,7 @@ proc getBaseExec*(exec: string): string =
     if idx >= toks.len:
       return "env"
 
-  # sh|bash|zsh -c "…"
+  ## sh|bash|zsh -c "…"
   if idx < toks.len and (toks[idx] in ["sh", "bash", "zsh"]) and idx+2 <= toks.len:
     var j = idx + 1
     while j < toks.len and toks[j] != "-c":
@@ -117,20 +117,20 @@ proc getBaseExec*(exec: string): string =
     if j < toks.len and j+1 < toks.len:
       return getBaseExec(toks[j+1])
 
-  # flatpak/snap run <app-id>
+  ## flatpak/snap run <app-id>
   if idx+2 < toks.len and toks[idx] == "flatpak" and toks[idx+1] == "run":
     return toks[idx+2].extractFilename()
   if idx+2 < toks.len and toks[idx] == "snap" and toks[idx+1] == "run":
     return toks[idx+2].extractFilename()
 
-  # sudo/pkexec wrappers
+  ## sudo/pkexec wrappers
   if idx < toks.len and (toks[idx] == "sudo" or toks[idx] == "pkexec"):
     inc idx
     if idx >= toks.len:
       return "sudo"
     return toks[idx].extractFilename()
 
-  # default: first non-wrapper token’s basename
+  ## default: first non-wrapper token’s basename
   toks[idx].extractFilename()
 
 # ── Locale helpers ──────────────────────────────────────────────────────
@@ -153,7 +153,7 @@ proc localeChain(): seq[string] =
       result.add s[0 ..< us]           # language only (e.g. "en")
     elif s.len >= 2:
       result.add s[0 ..< 2]
-  # Always finish with plain English fallback, once.
+  ## Always finish with plain English fallback, once.
   if not result.containsIgnoreCase("en"):
     result.add "en"
 
@@ -208,7 +208,7 @@ proc parseDesktopFile*(path: string): Option[DesktopApp] =
   let noDisplay = kv.getOrDefault("NoDisplay", "false").toLowerAscii() == "true"
   let terminalApp = kv.getOrDefault("Terminal", "false").toLowerAscii() == "true"
 
-  # Category filter: exclude Settings/System (exact tokens, case-insensitive)
+  ## Category filter: exclude Settings/System (exact tokens, case-insensitive)
   var catHit = false
   for tok in categories.split(';'):
     let t = tok.strip()

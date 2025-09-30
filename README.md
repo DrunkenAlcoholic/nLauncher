@@ -21,7 +21,8 @@
 | **Theme preview mode**               | `t:` shows a lightweight preview list of available themes                                                                            |
 | **Fast file search**                 | `s:` searches filesystem using `fd` (or `locate` fallback), typo-tolerant and ranked with match highlighting                         |
 | **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nlauncher.toml`                                                     |
-| **Prefix triggers**                  | `/ …` run shell command • `c: …` open dotfile • `t:` Theme preview • `s:` File search • custom `[[shortcuts]]` (e.g. `g:` → Google) |
+| **Power actions**                    | `p:` (configurable) shows shutdown/reboot/logout entries sourced from the TOML                                                       |
+| **Prefix triggers**                  | `r: …` run shell command • `c: …` open dotfile • `t:` Theme preview • `s:` File search • custom `[[shortcuts]]` (e.g. `g:` → Google) |
 | **Zero toolkit**                     | Pure Xlib + Xft + [parsetoml](https://github.com/NimParsers/parsetoml)                                                                |
 
 ---
@@ -63,10 +64,11 @@ nimble release   # produces ./bin/nlauncher
 | Keys / Pattern        | Action                                                                 |
 | --------------------- | ---------------------------------------------------------------------- |
 | *Type letters*        | Instant fuzzy filter (typo-tolerant)                                   |
-| `/ …`                 | Run shell command (everything after the slash is passed to your shell) |
+| `r: …` or `!…`        | Run shell command (everything after the prefix is passed to your shell) |
 | `c: …`                | Search `~/.config` for dotfiles and open in your editor                |
 | `t:`                  | Preview available themes in a quick selection list                     |
 | `s:`                  | Search filesystem for files and open with default application          |
+| `p:`                  | Show power actions (shutdown, reboot, logout, …) configured in TOML   |
 | `g:, y:, w:, …`       | Example custom shortcuts (configure via `[[shortcuts]]`)               |
 | **Enter**             | Launch item / run command                                              |
 | **Esc**               | Quit                                                                   |
@@ -113,6 +115,21 @@ program  = "kitty"
 [border]
 width    = 2
 
+[power]
+prefix = "p:"
+
+[[power_actions]]
+label   = "Shutdown"
+command = "systemctl poweroff"
+
+[[power_actions]]
+label   = "Reboot"
+command = "systemctl reboot"
+
+[[power_actions]]
+label   = "Logout"
+command = "loginctl terminate-user $USER"
+
 [[themes]]
 name                   = "Nord"
 bgColorHex             = "#2E3440"
@@ -157,6 +174,20 @@ mode   = "file"
 the command. `mode = "file"` expands the path (including `~`) and opens it with
 the default handler; the launcher stays open if the target is missing so you can
 adjust the query.
+
+### Power actions
+
+Add `[[power_actions]]` entries to expose system controls (shutdown, reboot,
+lock screen, etc.) behind a dedicated prefix (default `p:`). Each entry accepts:
+
+- `label` → text displayed in the results list.
+- `command` → shell command executed when selected (runs via `/bin/sh -c`).
+- `mode` *(optional)* → `spawn` (default) launches in the background, `terminal`
+  opens the configured terminal and runs the command there.
+- `stay_open` *(optional)* → keep nLauncher open after executing (default: close).
+
+Override the prefix by setting `[power].prefix = "x:"` (or leave empty to
+disable the trigger entirely).
 
 ---
 

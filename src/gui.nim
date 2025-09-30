@@ -145,10 +145,10 @@ proc drawStatusOverlay() =
   const marginX = 8
   const marginY = 6
 
-  # Start at top-right
+  ## Start at top-right
   var ty = (marginY + overlayFont.ascent).cint
 
-  # If theme name is currently fading, nudge status below it
+  ## If theme name is currently fading, nudge status below it
   let themeActive = (currentThemeName.len > 0) and ((nowMs() - lastThemeSwitchMs) <= FadeDurationMs)
   if themeActive:
     ty += (overlayFont.ascent + 4).cint
@@ -173,13 +173,13 @@ proc initGui*() =
     quit "Cannot open X display"
   screen = XDefaultScreen(display)
 
-  # Fonts
+  ## Fonts
   font = loadFont(display, screen, config.fontName)
   overlayFont = loadFont(display, screen, deriveSmallerFont(config.fontName))
   boldFont = loadFont(display, screen, deriveBoldFont(config.fontName))
 
-  #timeIt "UpdateGuiColors":
-  #  updateGuiColors()
+  ## timeIt "UpdateGuiColors":
+  ##  updateGuiColors()
 
   timeIt "Create Window":
     var winX, winY: cint
@@ -224,7 +224,7 @@ proc initGui*() =
     )
 
     if isWayland:
-      # Hint to favour a borderless dialog-like surface
+      ## Hint to favour a borderless dialog-like surface
       let wmTypeAtom = XInternAtom(display, "_NET_WM_WINDOW_TYPE", 0)
       let dialogAtom = XInternAtom(display, "_NET_WM_WINDOW_TYPE_DIALOG", 0)
       let atomAtom = XInternAtom(display, "ATOM", 0)
@@ -235,7 +235,7 @@ proc initGui*() =
         cast[Pcuchar](addr dialogAtom), 1.cint
       )
 
-      # _MOTIF_WM_HINTS: disable decorations where respected
+      ## _MOTIF_WM_HINTS: disable decorations where respected
       const MWM_HINTS_DECORATIONS = 2'u32
       let mwmHintsAtom = XInternAtom(display, "_MOTIF_WM_HINTS", 0)
       var mwmHints: array[5, uint64]
@@ -290,7 +290,7 @@ proc drawText*(txt: string; x, y: cint; spans: seq[(int, int)] = @[];
     cuint(config.lineHeight)
   )
 
-  # Base text
+  ## Base text
   let baseFg = if selected: xftColorHighlightFg else: xftColorFg
   if txt.len > 0:
     XftDrawStringUtf8(
@@ -302,7 +302,7 @@ proc drawText*(txt: string; x, y: cint; spans: seq[(int, int)] = @[];
       txt.len.cint
     )
 
-  # Overlay matched segments (bold + match colour)
+  ## Overlay matched segments (bold + match colour)
   for (s, len) in spans:
     if len <= 0 or s < 0 or s >= txt.len: continue
     let e = min(s + len, txt.len)
@@ -347,11 +347,11 @@ proc redrawWindow*() =
     drawText(app.name, 12, y, matchSpans[idx], selected)
     y += config.lineHeight.cint
 
-  # Theme overlay (top-right)
+  ## Theme overlay (top-right)
   drawThemeOverlay()
   drawStatusOverlay()
 
-  # Small clock (bottom-right, overlay font)
+  ## Small clock (bottom-right, overlay font)
   let nowStr = now().format("HH:mm")
   let cw = textWidth(nowStr, true)
   let cx = config.winWidth - int(cw) - 2
@@ -365,7 +365,7 @@ proc redrawWindow*() =
     nowStr.len.cint
   )
 
-  # Border
+  ## Border
   if config.borderWidth > 0:
     discard XSetForeground(display, gc, config.borderColor)
     for i in 0 ..< config.borderWidth:
