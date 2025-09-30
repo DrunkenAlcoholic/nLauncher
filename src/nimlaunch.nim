@@ -324,7 +324,7 @@ proc loadShortcutsSection(tbl: toml.TomlValueRef; cfgPath: string) =
       if prefix.len == 0 or base.len == 0:
         continue
 
-      let label = scTbl.getOrDefault("label").getStr("").strip()
+      let label = scTbl.getOrDefault("label").getStr("").strip(chars = {'\t', '\r', '\n'})
       let modeStr = scTbl.getOrDefault("mode").getStr("url").toLowerAscii
 
       var mode = smUrl
@@ -657,11 +657,19 @@ proc substituteQuery(pattern, value: string): string =
     result = pattern & value
 
 proc shortcutLabel(sc: Shortcut; query: string): string =
-  ## Compose UI label for a shortcut result.
-  if sc.label.len > 0:
-    result = sc.label & query
-  else:
-    result = query
+  ## Compose UI label for a shortcut result. Preserve user-provided spacing
+  ## but inject a single space when the label doesn't already end with one.
+  if sc.label.len == 0:
+    return query
+
+  if query.len == 0:
+    return sc.label
+
+  result = sc.label
+  let last = sc.label[^1]
+  if last notin {' ', '\t', '\v', '\f', '\r', '\n'}:
+    result.add ' '
+  result.add query
 
 proc shortcutExec(sc: Shortcut; query: string): string =
   ## Build the execution string for a shortcut before mode-specific handling.
