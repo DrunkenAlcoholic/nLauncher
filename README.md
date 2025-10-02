@@ -17,7 +17,9 @@
 | **Sub-1 ms startup (bench mode)**    | `--bench` flag for raw launch timing                                                                                                 |
 | **Recent-apps history**              | Empty query shows your last launches first                                                                                           |
 | **100% keyboard-driven**             | Arrow keys / PageUp / PageDown / Home / End / Left / Right / Enter / Esc                                                             |
+| **Optional Vim navigation**          | Enable `vim_mode` for `hjkl`, `gg`, `/` search, `:q`, and a bottom command bar                                                       |
 | **Live theme cycling & persistence** | Press F5 to cycle themes; saves your last choice in the TOML config                                                                  |
+| **Single-instance guard**            | Second launch reuses the running session (no duplicate windows)                                                                     |
 | **Theme preview mode**               | `t:` shows a lightweight preview list of available themes                                                                            |
 | **Fast file search**                 | `s:` searches filesystem using `fd` (or `locate` fallback), typo-tolerant and ranked with match highlighting                         |
 | **Fully themable via TOML**          | 25+ colour schemes built-in; add your own under `[[themes]]` in `nimlaunch.toml`                                                     |
@@ -76,12 +78,14 @@ nimble release   # produces ./bin/nimlaunch
 | `g:, y:, w:, …`       | Example custom shortcuts (configure via `[[shortcuts]]`)               |
 | **Enter**             | Launch item / run command                                              |
 | **Esc**               | Quit                                                                   |
+| **Esc (Vim mode)**    | Insert → Normal; Normal → quit (or use `:q`)                           |
 | **↑ / ↓**             | Navigate list                                                          |
 | **←**                 | Backspace (alias for quick typo fix)                                   |
 | **PageUp / PageDown** | Scroll list faster                                                     |
 | **Home / End**        | Jump to top/bottom of list                                             |
 | **F5**                | Cycle built-in themes                                                  |
 | *(empty query)*       | Shows recent applications first                                        |
+| *Vim mode (optional)* | `hjkl` to move, `gg`/`G`, `:q` to exit, `/` to search, `i`/`a` back to insert                              |
 
 ---
 
@@ -112,6 +116,7 @@ fontname = "Noto Sans:size=12"
 [input]
 prompt   = "> "
 cursor   = "_"
+vim_mode = false        # set true to enable Vim-style normal/insert modes
 
 [terminal]
 program  = "kitty"

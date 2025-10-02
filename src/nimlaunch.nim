@@ -3,10 +3,15 @@
 
 # ── Imports ─────────────────────────────────────────────────────────────
 import std/[os, osproc, strutils, options, tables, sequtils, json, uri, sets,
-            algorithm, times, heapqueue, streams]
+            algorithm, times, heapqueue, streams, exitprocs]
+when defined(posix):
+  import posix
 import parsetoml as toml
 import x11/[xlib, xutil, x, keysym]
 import ./[state, parser, gui, utils]
+when defined(posix):
+  when not declared(flock):
+    proc flock(fd: cint; operation: cint): cint {.importc, header: "<sys/file.h>".}
 
 # ── Module-local globals ────────────────────────────────────────────────
 var
@@ -22,6 +27,83 @@ const
   SearchDebounceMs = 240     # debounce for s: while typing (unified)
   SearchFdCap      = 800     # cap external search results from fd/locate
   SearchShowCap    = 250     # cap items we score per rebuild
+  CacheFormatVersion = 2
+
+var
+  lockFilePath = ""
+when defined(posix):
+  var lockFd: cint = -1
+
+# ── Single-instance helpers ────────────────────────────────────────────
+when defined(posix):
+  const
+    LOCK_EX = 2.cint
+    LOCK_NB = 4.cint
+    LOCK_UN = 8.cint
+
+  proc releaseSingleInstanceLock() =
+    if lockFd >= 0:
+      discard flock(lockFd, LOCK_UN)
+      discard close(lockFd)
+      lockFd = -1
+    if lockFilePath.len > 0 and fileExists(lockFilePath):
+      try:
+        removeFile(lockFilePath)
+      except CatchableError:
+        discard
+
+  proc ensureSingleInstance(): bool =
+    ## Obtain an exclusive advisory lock; return false if another instance owns it.
+    let cacheDir = getHomeDir() / ".cache" / "nimlaunch"
+    try:
+      createDir(cacheDir)
+    except CatchableError:
+      discard
+    lockFilePath = cacheDir / "nimlaunch.lock"
+
+    let fd = open(lockFilePath.cstring, O_RDWR or O_CREAT, 0o664)
+    if fd < 0:
+      echo "NimLaunch warning: unable to open lock file at ", lockFilePath
+      return true
+
+    if flock(fd, LOCK_EX or LOCK_NB) != 0:
+      discard close(fd)
+      return false
+
+    discard ftruncate(fd, 0)
+    discard lseek(fd, 0, 0)
+    let pidStr = $getCurrentProcessId() & '\n'
+    discard write(fd, pidStr.cstring, pidStr.len.cint)
+
+    lockFd = fd
+    addExitProc(releaseSingleInstanceLock)
+    true
+else:
+  proc releaseSingleInstanceLock() =
+    if lockFilePath.len > 0 and fileExists(lockFilePath):
+      try:
+        removeFile(lockFilePath)
+      except CatchableError:
+        discard
+
+  proc ensureSingleInstance(): bool =
+    ## Basic file sentinel fallback for non-POSIX targets.
+    let cacheDir = getHomeDir() / ".cache" / "nimlaunch"
+    try:
+      createDir(cacheDir)
+    except CatchableError:
+      discard
+    lockFilePath = cacheDir / "nimlaunch.lock"
+
+    if fileExists(lockFilePath):
+      return false
+
+    try:
+      writeFile(lockFilePath, $getCurrentProcessId())
+      addExitProc(releaseSingleInstanceLock)
+    except CatchableError:
+      discard
+    true
 
 # ── Shell / process helpers ─────────────────────────────────────────────
 proc hasHoldFlagLocal(args: seq[string]): bool =
@@ -280,12 +362,17 @@ proc loadApplications() =
 
   if fileExists(cacheFile):
     try:
-      let c = to(parseJson(readFile(cacheFile)), CacheData)
-      if c.usrMtime == usrM and c.localMtime == locM:
-        timeIt "Cache hit:":
-          allApps = c.apps
-          filteredApps = allApps
-        return
+      let node = parseJson(readFile(cacheFile))
+      if node.kind == JObject and node.hasKey("formatVersion") and
+         node["formatVersion"].getInt == CacheFormatVersion:
+        let c = to(node, CacheData)
+        if c.usrMtime == usrM and c.localMtime == locM:
+          timeIt "Cache hit:":
+            allApps = c.apps
+            filteredApps = allApps
+          return
+      else:
+        echo "Cache invalid — rescanning …"
     except:
       echo "Cache miss — rescanning …"
 
@@ -297,7 +384,12 @@ proc loadApplications() =
         let opt = parseDesktopFile(path)
         if isSome(opt):
           let app = get(opt)
-          let key = getBaseExec(app.exec)
+          let sanitizedExec = parser.stripFieldCodes(app.exec).strip()
+          var key = sanitizedExec.toLowerAscii
+          if key.len == 0:
+            key = getBaseExec(app.exec).toLowerAscii
+          if key.len == 0:
+            key = app.name.toLowerAscii
           if not dedup.hasKey(key) or (app.hasIcon and not dedup[key].hasIcon):
             dedup[key] = app
 
@@ -306,7 +398,10 @@ proc loadApplications() =
     filteredApps = allApps
     try:
       createDir(cacheDir)
-      writeFile(cacheFile, pretty(%CacheData(usrMtime: usrM, localMtime: locM, apps: allApps)))
+      writeFile(cacheFile, pretty(%CacheData(formatVersion: CacheFormatVersion,
+                                             usrMtime: usrM,
+                                             localMtime: locM,
+                                             apps: allApps)))
     except:
       echo "Warning: cache not saved."
 
@@ -396,6 +491,7 @@ proc initLauncherConfig() =
   config.borderWidth = 2
   config.matchFgColorHex = "#f8c291"
   config.powerPrefix = "p:"
+  config.vimMode = false
 
   ## Ensure TOML exists
   let cfgDir = getHomeDir() / ".config" / "nimlaunch"
@@ -435,6 +531,7 @@ proc initLauncherConfig() =
       let inp = tbl["input"].getTable()
       config.prompt = inp.getOrDefault("prompt").getStr(config.prompt)
       config.cursor = inp.getOrDefault("cursor").getStr(config.cursor)
+      config.vimMode = inp.getOrDefault("vim_mode").getBool(config.vimMode)
     except CatchableError:
       echo "NimLaunch warning: ignoring invalid [input] section in ", cfgPath
 
@@ -940,14 +1037,152 @@ proc performAction(a: Action) =
     exitAfter = false
   if exitAfter: shouldExit = true
 
+# ── Input/navigation helpers ───────────────────────────────────────────
+proc deleteLastInputChar() =
+  if inputText.len > 0:
+    inputText.setLen(inputText.len - 1)
+    lastInputChangeMs = gui.nowMs()
+    buildActions()
+
+proc activateCurrentSelection() =
+  if selectedIndex in 0..<actions.len:
+    performAction(actions[selectedIndex])
+
+proc moveSelectionBy(step: int) =
+  if filteredApps.len == 0: return
+  var newIndex = selectedIndex + step
+  if newIndex < 0: newIndex = 0
+  if newIndex > filteredApps.len - 1: newIndex = filteredApps.len - 1
+  if newIndex == selectedIndex: return
+  selectedIndex = newIndex
+  if selectedIndex < viewOffset:
+    viewOffset = selectedIndex
+  elif selectedIndex >= viewOffset + config.maxVisibleItems:
+    viewOffset = selectedIndex - config.maxVisibleItems + 1
+    if viewOffset < 0: viewOffset = 0
+
+proc jumpToTop() =
+  if filteredApps.len == 0: return
+  selectedIndex = 0
+  viewOffset = 0
+
+proc jumpToBottom() =
+  if filteredApps.len == 0: return
+  selectedIndex = filteredApps.len - 1
+  let start = filteredApps.len - config.maxVisibleItems
+  viewOffset = if start > 0: start else: 0
+
+proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
+  if not config.vimMode:
+    return false
+
+  if vimCommandBuffer.len > 0:
+    case ks
+    of XK_Return:
+      let cmd = vimCommandBuffer
+      vimCommandBuffer.setLen(0)
+      vimPendingG = false
+      if cmd == ":q":
+        shouldExit = true
+      elif cmd.len > 0 and cmd[0] == '/':
+        let pattern = if cmd.len > 1: cmd[1 .. ^1] else: ""
+        inputText = pattern
+        lastInputChangeMs = gui.nowMs()
+        buildActions()
+        vimInNormalMode = false
+      return true
+    of XK_BackSpace:
+      if vimCommandBuffer.len > 1:
+        vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
+      else:
+        vimCommandBuffer.setLen(0)
+      return true
+    of XK_Escape:
+      vimCommandBuffer.setLen(0)
+      return true
+    else:
+      if ch != '\0' and ch >= ' ':
+        if vimCommandBuffer == "/" and ch == ':':
+          vimCommandBuffer = ":"
+        else:
+          vimCommandBuffer.add(ch)
+      return true
+
+  if vimInNormalMode:
+    case ks
+    of XK_Escape:
+      vimPendingG = false
+      return true
+    of XK_i, XK_a:
+      vimInNormalMode = false
+      vimPendingG = false
+      return true
+    of XK_colon:
+      vimCommandBuffer = ":"
+      vimPendingG = false
+      return true
+    of XK_slash:
+      vimCommandBuffer = "/"
+      vimPendingG = false
+      return true
+    of XK_j:
+      vimPendingG = false
+      moveSelectionBy(1)
+      return true
+    of XK_k:
+      vimPendingG = false
+      moveSelectionBy(-1)
+      return true
+    of XK_h:
+      vimPendingG = false
+      deleteLastInputChar()
+      return true
+    of XK_l:
+      vimPendingG = false
+      activateCurrentSelection()
+      return true
+    of XK_g:
+      let shifted = (state and ShiftMask) != 0
+      if shifted:
+        vimPendingG = false
+        jumpToBottom()
+      elif vimPendingG:
+        vimPendingG = false
+        jumpToTop()
+      else:
+        vimPendingG = true
+      return true
+    else:
+      if ch != '\0' and ch >= ' ':
+        vimPendingG = false
+        return true
+      vimPendingG = false
+      return false
+
+  if ks == XK_Escape:
+    vimInNormalMode = true
+    vimPendingG = false
+    if vimCommandBuffer.len > 0:
+      vimCommandBuffer.setLen(0)
+    return true
+
+  return false
+
 # ── Main loop ───────────────────────────────────────────────────────────
 proc main() =
+  if not ensureSingleInstance():
+    echo "NimLaunch is already running."
+    quit 0
   benchMode = "--bench" in commandLineParams()
 
   timeIt "Init Config:": initLauncherConfig()
   timeIt "Load Applications:": loadApplications()
   timeIt "Load Recent Apps:": loadRecent()
   timeIt "Build Actions:": buildActions()
+
+  vimInNormalMode = false
+  vimPendingG = false
+  vimCommandBuffer.setLen(0)
 
   initGui()
 
@@ -986,68 +1221,52 @@ proc main() =
       var ks: KeySym
       discard XLookupString(ev.xkey.addr, cast[cstring](buf[0].addr), buf.len.cint,
                             ks.addr, nil)
-      case ks
-      of XK_Escape:
-        shouldExit = true
+      let ch = buf[0]
+      var handled = false
+      if config.vimMode:
+        handled = handleVimKey(ks, ch, ev.xkey.state)
+      if not handled:
+        case ks
+        of XK_Escape:
+          shouldExit = true
 
-      of XK_Return:
-        if selectedIndex in 0..<actions.len:
-          performAction(actions[selectedIndex])
+        of XK_Return:
+          activateCurrentSelection()
 
-      of XK_BackSpace, XK_Left:
-        ## Backspace: remove last char. Also map Left→Backspace for quick fix.
-        if inputText.len > 0:
-          inputText.setLen(inputText.len - 1)
-          lastInputChangeMs = gui.nowMs()
-          buildActions()
+        of XK_BackSpace, XK_Left:
+          deleteLastInputChar()
 
-      of XK_Right:
-        discard # no mid-string editing yet
+        of XK_Right:
+          discard # no mid-string editing yet
 
-      of XK_Up:
-        if selectedIndex > 0:
-          dec selectedIndex
-          if selectedIndex < viewOffset: viewOffset = selectedIndex
+        of XK_Up:
+          moveSelectionBy(-1)
 
-      of XK_Down:
-        if selectedIndex < filteredApps.len - 1:
-          inc selectedIndex
-          if selectedIndex >= viewOffset + config.maxVisibleItems:
-            viewOffset = selectedIndex - config.maxVisibleItems + 1
+        of XK_Down:
+          moveSelectionBy(1)
 
-      of XK_Page_Up:
-        if filteredApps.len > 0:
-          let step = max(1, config.maxVisibleItems)
-          selectedIndex = max(0, selectedIndex - step)
-          viewOffset = max(0, viewOffset - step)
+        of XK_Page_Up:
+          if filteredApps.len > 0:
+            moveSelectionBy(-max(1, config.maxVisibleItems))
 
-      of XK_Page_Down:
-        if filteredApps.len > 0:
-          let step = max(1, config.maxVisibleItems)
-          selectedIndex = min(filteredApps.len - 1, selectedIndex + step)
-          let bottom = viewOffset + config.maxVisibleItems - 1
-          if selectedIndex > bottom:
-            viewOffset = min(selectedIndex, filteredApps.len - 1) - (config.maxVisibleItems - 1)
-            if viewOffset < 0: viewOffset = 0
+        of XK_Page_Down:
+          if filteredApps.len > 0:
+            moveSelectionBy(max(1, config.maxVisibleItems))
 
-      of XK_Home:
-        if filteredApps.len > 0:
-          selectedIndex = 0
-          viewOffset = 0
+        of XK_Home:
+          jumpToTop()
 
-      of XK_End:
-        if filteredApps.len > 0:
-          selectedIndex = filteredApps.len - 1
-          viewOffset = max(0, filteredApps.len - config.maxVisibleItems)
+        of XK_End:
+          jumpToBottom()
 
-      of XK_F5:
-        cycleTheme(config)
+        of XK_F5:
+          cycleTheme(config)
 
-      else:
-        if buf[0] != '\0' and buf[0] >= ' ':
-          inputText.add(buf[0])
-          lastInputChangeMs = gui.nowMs()
-          buildActions()
+        else:
+          if ch != '\0' and ch >= ' ':
+            inputText.add(ch)
+            lastInputChangeMs = gui.nowMs()
+            buildActions()
 
       if not shouldExit:
         gui.redrawWindow()
@@ -1055,8 +1274,13 @@ proc main() =
     of ButtonPress:
       shouldExit = true
     of FocusOut:
-      if seenMapNotify: seenMapNotify = false
-      else: shouldExit = true
+      let mode = ev.xfocus.mode
+      if mode == NotifyGrab or mode == NotifyUngrab:
+        discard
+      elif seenMapNotify:
+        seenMapNotify = false
+      else:
+        shouldExit = true
     else:
       discard
 

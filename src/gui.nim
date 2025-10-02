@@ -330,6 +330,8 @@ proc redrawWindow*() =
     cuint(config.winMaxHeight)
   )
 
+  let commandActive = config.vimMode and vimCommandBuffer.len > 0
+
   var y: cint = font.ascent + 8
   let promptLine = config.prompt & inputText & (
       if benchMode: "" else: config.cursor)
@@ -347,23 +349,48 @@ proc redrawWindow*() =
     drawText(app.name, 12, y, matchSpans[idx], selected)
     y += config.lineHeight.cint
 
+  ## Command line (bottom)
+  if commandActive:
+    let barHeight = config.lineHeight + 6
+    var barTop = config.winMaxHeight - barHeight - 4
+    if barTop < 0: barTop = 0
+    discard XSetForeground(display, gc, config.highlightBgColor)
+    discard XFillRectangle(
+      display, window, gc,
+      0, barTop.cint,
+      cuint(config.winWidth),
+      cuint(barHeight)
+    )
+    if vimCommandBuffer.len > 0:
+      let textY = (barTop + font.ascent + 3).cint
+      XftDrawStringUtf8(
+        xftDraw,
+        cast[PXftColor](addr xftColorHighlightFg),
+        font,
+        12,
+        textY,
+        cast[PFcChar8](vimCommandBuffer[0].addr),
+        vimCommandBuffer.len.cint
+      )
+
   ## Theme overlay (top-right)
   drawThemeOverlay()
   drawStatusOverlay()
 
   ## Small clock (bottom-right, overlay font)
-  let nowStr = now().format("HH:mm")
-  let cw = textWidth(nowStr, true)
-  let cx = config.winWidth - int(cw) - 2
-  let cy = config.winMaxHeight - 8
-  XftDrawStringUtf8(
-    xftDraw,
-    cast[PXftColor](addr xftColorFg),
-    overlayFont,
-    cint(cx), cint(cy),
-    cast[PFcChar8](nowStr[0].addr),
-    nowStr.len.cint
-  )
+  if not commandActive:
+    let nowStr = now().format("HH:mm")
+    let cw = textWidth(nowStr, true)
+    let cx = config.winWidth - int(cw) - 2
+    let cy = config.winMaxHeight - 8
+    XftDrawStringUtf8(
+      xftDraw,
+      cast[PXftColor](addr xftColorFg),
+      overlayFont,
+      cint(cx), cint(cy),
+      cast[PFcChar8](nowStr[0].addr),
+      nowStr.len.cint
+    )
 
   ## Border
   if config.borderWidth > 0:

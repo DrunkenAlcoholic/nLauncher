@@ -19,6 +19,7 @@ type
 
   ## Payload cached to `~/.cache/nimlaunch/apps.json`.
   CacheData* = object
+    formatVersion*: int
     usrMtime*, localMtime*: int64
     apps*: seq[DesktopApp]
 
@@ -44,6 +45,7 @@ type
     themeName*: string
     terminalExe*: string     ## preferred terminal program
     powerPrefix*: string     ## input prefix for power/system actions
+    vimMode*: bool
 
     # Resolved X pixel colours (set once the X connection is live) -------
     bgColor*, fgColor*, highlightBgColor*, highlightFgColor*,
@@ -126,6 +128,9 @@ var
   matchSpans*: seq[seq[(int, int)]] ## per row: (start,len) spans to highlight
   shortcuts*: seq[Shortcut]
   powerActions*: seq[PowerAction]
+  vimCommandBuffer*: string
+  vimInNormalMode*: bool = false
+  vimPendingG*: bool = false
 
 # ── Constants ───────────────────────────────────────────────────────────
 const
@@ -160,6 +165,7 @@ fontname = "Noto Sans:size=12"    # Font name & size (Xft format: "Font Family:s
 [input]
 prompt = "> "                     # Prompt prefix shown before your query
 cursor = "_"                      # Cursor character displayed after query text
+vim_mode = false                  # true enables Vim-style modes/hjkl navigation
 
 [terminal]
 program = "gnome-terminal"        # Terminal emulator for slash commands (/ ...)
