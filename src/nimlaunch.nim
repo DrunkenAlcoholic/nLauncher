@@ -1117,9 +1117,8 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
       return true
 
   if vimInNormalMode:
-    if ks == XK_g or ks == XK_G:
-      let uppercase = (state and ShiftMask.cuint) != 0 or ks == XK_G or ch == 'G'
-      if uppercase:
+    if ks == XK_g or ks == XKc_G:
+      if ks == XKc_G:
         vimPendingG = false
         jumpToBottom()
       elif vimPendingG:
@@ -1128,6 +1127,7 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
       else:
         vimPendingG = true
       return true
+      
     case ks
     of XK_Escape:
       vimPendingG = false
