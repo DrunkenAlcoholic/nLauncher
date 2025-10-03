@@ -21,6 +21,7 @@ type
   CacheData* = object
     formatVersion*: int
     usrMtime*, localMtime*: int64
+    flatpakUserMtime*, flatpakSystemMtime*: int64
     apps*: seq[DesktopApp]
 
   ## Launcher configuration populated by initLauncherConfig.

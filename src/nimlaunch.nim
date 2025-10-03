@@ -27,7 +27,7 @@ const
   SearchDebounceMs = 240     # debounce for s: while typing (unified)
   SearchFdCap      = 800     # cap external search results from fd/locate
   SearchShowCap    = 250     # cap items we score per rebuild
-  CacheFormatVersion = 2
+  CacheFormatVersion = 3
 
 var
   lockFilePath = ""
@@ -354,11 +354,15 @@ proc loadApplications() =
   ## Scan .desktop files with caching to ~/.cache/nimlaunch/apps.json.
   let usrDir   = "/usr/share/applications"
   let locDir   = getHomeDir() / ".local/share/applications"
+  let flatpakUserDir = getHomeDir() / ".local/share/flatpak/exports/share/applications"
+  let flatpakSystemDir = "/var/lib/flatpak/exports/share/applications"
   let cacheDir = getHomeDir() / ".cache" / "nimlaunch"
   let cacheFile = cacheDir / "apps.json"
 
   let usrM = newestDesktopMtime(usrDir)
   let locM = newestDesktopMtime(locDir)
+  let flatpakUserM = newestDesktopMtime(flatpakUserDir)
+  let flatpakSystemM = newestDesktopMtime(flatpakSystemDir)
 
   if fileExists(cacheFile):
     try:
@@ -366,7 +370,9 @@ proc loadApplications() =
       if node.kind == JObject and node.hasKey("formatVersion") and
          node["formatVersion"].getInt == CacheFormatVersion:
         let c = to(node, CacheData)
-        if c.usrMtime == usrM and c.localMtime == locM:
+        if c.usrMtime == usrM and c.localMtime == locM and
+           c.flatpakUserMtime == flatpakUserM and
+           c.flatpakSystemMtime == flatpakSystemM:
           timeIt "Cache hit:":
             allApps = c.apps
             filteredApps = allApps
@@ -378,7 +384,7 @@ proc loadApplications() =
 
   timeIt "Full scan:":
     var dedup = initTable[string, DesktopApp]()
-    for dir in @[locDir, usrDir]:
+    for dir in @[flatpakUserDir, locDir, usrDir, flatpakSystemDir]:
       if not dirExists(dir): continue
       for path in walkFiles(dir / "*.desktop"):
         let opt = parseDesktopFile(path)
@@ -401,6 +407,8 @@ proc loadApplications() =
       writeFile(cacheFile, pretty(%CacheData(formatVersion: CacheFormatVersion,
                                              usrMtime: usrM,
                                              localMtime: locM,
+                                             flatpakUserMtime: flatpakUserM,
+                                             flatpakSystemMtime: flatpakSystemM,
                                              apps: allApps)))
     except:
       echo "Warning: cache not saved."
@@ -1109,6 +1117,17 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
       return true
 
   if vimInNormalMode:
+    if ks == XK_g or ks == XK_G:
+      let uppercase = (state and ShiftMask.cuint) != 0 or ks == XK_G or ch == 'G'
+      if uppercase:
+        vimPendingG = false
+        jumpToBottom()
+      elif vimPendingG:
+        vimPendingG = false
+        jumpToTop()
+      else:
+        vimPendingG = true
+      return true
     case ks
     of XK_Escape:
       vimPendingG = false
@@ -1140,17 +1159,6 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
     of XK_l:
       vimPendingG = false
       activateCurrentSelection()
-      return true
-    of XK_g:
-      let shifted = (state and ShiftMask) != 0
-      if shifted:
-        vimPendingG = false
-        jumpToBottom()
-      elif vimPendingG:
-        vimPendingG = false
-        jumpToTop()
-      else:
-        vimPendingG = true
       return true
     else:
       if ch != '\0' and ch >= ' ':

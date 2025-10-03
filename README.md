@@ -18,6 +18,7 @@
 | **Recent-apps history**              | Empty query shows your last launches first                                                                                           |
 | **100% keyboard-driven**             | Arrow keys / PageUp / PageDown / Home / End / Left / Right / Enter / Esc                                                             |
 | **Optional Vim navigation**          | Enable `vim_mode` for `hjkl`, `gg`, `/` search, `:q`, and a bottom command bar                                                       |
+| **Flatpak launcher support**         | Scans Flatpak export directories alongside standard `.desktop` paths                                                                |
 | **Live theme cycling & persistence** | Press F5 to cycle themes; saves your last choice in the TOML config                                                                  |
 | **Single-instance guard**            | Second launch reuses the running session (no duplicate windows)                                                                     |
 | **Theme preview mode**               | `t:` shows a lightweight preview list of available themes                                                                            |
