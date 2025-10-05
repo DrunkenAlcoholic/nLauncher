@@ -45,7 +45,7 @@ type
     fontName*: string
     themeName*: string
     terminalExe*: string     ## preferred terminal program
-    powerPrefix*: string     ## input prefix for power/system actions
+    powerPrefix*: string     ## normalized power keyword (no leading ':')
     vimMode*: bool
 
     # Resolved X pixel colours (set once the X connection is live) -------
@@ -132,6 +132,10 @@ var
   vimCommandBuffer*: string
   vimPendingG*: bool = false
   vimCommandActive*: bool = false
+  vimSavedInput*: string              ## original query before opening Vim command line
+  vimSavedSelectedIndex*: int = 0     ## selection to restore if command is cancelled
+  vimSavedViewOffset*: int = 0        ## scroll offset to restore alongside selection
+  vimCommandRestorePending*: bool = false ## true while original state can still be restored
 
 # ── Constants ───────────────────────────────────────────────────────────
 const
@@ -179,7 +183,7 @@ width = 2                         # Border thickness in pixels (0 = no border)
 # Shortcuts
 # ==========================
 # Define custom prefix triggers. Each shortcut supports:
-#   prefix  = letters starting with ':' (e.g., ":g")
+#   prefix  = letters you trigger with ':' (e.g., ":g"); leading/trailing ':' is optional
 #   label   = text shown before your query in the results list
 #   base    = template containing optional {query} placeholder
 #   mode    = "url" (default), "shell", or "file"
@@ -210,12 +214,12 @@ mode   = "url"
 # ==========================
 # Power actions
 # ==========================
-# Configure system commands exposed under the `p:` prefix (customisable).
+# Configure system commands exposed under the `p` prefix (type `:p` in the UI).
 # `mode` accepts "spawn" (background shell) or "terminal" (runs inside
 # your configured terminal). `stay_open = true` keeps the launcher visible.
 
 [power]
-prefix = ":p"
+prefix = ":p"           # Any prefix you write (with/without ':') maps to one trigger
 
 [[power_actions]]
 label   = "Shutdown"

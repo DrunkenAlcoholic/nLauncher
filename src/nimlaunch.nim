@@ -153,14 +153,16 @@ proc runCommand(cmd: string) =
   var parts = tokenize(chooseTerminal()) # parser.tokenize on config.terminalExe/$TERMINAL
   if parts.len == 0:
     let (_, shArgs) = buildShellCommand(cmd, shExe)
-    discard startProcess(shExe, args = shArgs, options = {poDaemon})
+    discard startProcess(shExe, args = shArgs,
+                         options = {poDaemon, poParentStreams})
     return
 
   let exe = parts[0]
   let exePath = findExe(exe)
   if exePath.len == 0:
     let (_, shArgs) = buildShellCommand(cmd, shExe)
-    discard startProcess(shExe, args = shArgs, options = {poDaemon})
+    discard startProcess(shExe, args = shArgs,
+                         options = {poDaemon, poParentStreams})
     return
 
   var termArgs = if parts.len > 1: parts[1..^1] else: @[]
@@ -168,12 +170,14 @@ proc runCommand(cmd: string) =
   let hold = hasHoldFlagLocal(termArgs)
   let (_, shArgs) = buildShellCommand(cmd, shExe, hold)
   let argv = buildTerminalArgs(base, termArgs, shExe, shArgs)
-  discard startProcess(exePath, args = argv, options = {poDaemon})
+  discard startProcess(exePath, args = argv,
+                       options = {poDaemon, poParentStreams})
 
 proc spawnShellCommand(cmd: string): bool =
   ## Execute *cmd* via /bin/sh in the background; return success.
   try:
-    discard startProcess("/bin/sh", args = ["-c", cmd], options = {poDaemon})
+    discard startProcess("/bin/sh", args = ["-c", cmd],
+                         options = {poDaemon, poParentStreams})
     true
   except CatchableError as e:
     echo "spawnShellCommand failed: ", cmd, " (", e.name, "): ", e.msg
@@ -182,7 +186,8 @@ proc spawnShellCommand(cmd: string): bool =
 proc openUrl(url: string) =
   ## Open *url* via xdg-open (no shell involved). Log failures for diagnosis.
   try:
-    discard startProcess("/usr/bin/env", args = @["xdg-open", url], options = {poDaemon})
+    discard startProcess("/usr/bin/env", args = @["xdg-open", url],
+                         options = {poDaemon, poParentStreams})
   except CatchableError as e:
     echo "openUrl failed: ", url, " (", e.name, "): ", e.msg
 
@@ -258,6 +263,12 @@ proc scanConfigFiles*(query: string): seq[DesktopApp] =
         )
   except OSError:
     discard
+
+# ── Prefix helpers ─────────────────────────────────────────────────────
+proc normalizePrefix(prefix: string): string =
+  ## Canonicalise user-configured prefixes by trimming colons/whitespace and
+  ## lowercasing so parsing is resilient to variants like ":g", "g:" or ":G:".
+  result = prefix.strip(chars = Whitespace + {':'}).toLowerAscii
 
 # ── Theme helpers ───────────────────────────────────────────────────────
 proc applyTheme*(cfg: var Config; name: string) =
@@ -422,7 +433,8 @@ proc loadShortcutsSection(tbl: toml.TomlValueRef; cfgPath: string) =
   try:
     for scVal in tbl["shortcuts"].getElems():
       let scTbl = scVal.getTable()
-      let prefix = scTbl.getOrDefault("prefix").getStr("").strip()
+      let prefixRaw = scTbl.getOrDefault("prefix").getStr("")
+      let prefix = normalizePrefix(prefixRaw)
       let base = scTbl.getOrDefault("base").getStr("").strip()
       if prefix.len == 0 or base.len == 0:
         continue
@@ -447,9 +459,8 @@ proc loadPowerSection(tbl: toml.TomlValueRef; cfgPath: string) =
   if tbl.hasKey("power"):
     try:
       let p = tbl["power"].getTable()
-      config.powerPrefix = p.getOrDefault("prefix").getStr(config.powerPrefix).strip()
-      if config.powerPrefix.len > 0 and not config.powerPrefix.endsWith(":"):
-        config.powerPrefix &= ":"
+      let rawPrefix = p.getOrDefault("prefix").getStr(config.powerPrefix)
+      config.powerPrefix = normalizePrefix(rawPrefix)
     except CatchableError:
       echo "NimLaunch warning: ignoring invalid [power] section in ", cfgPath
 
@@ -498,7 +509,7 @@ proc initLauncherConfig() =
   config.terminalExe = "gnome-terminal"
   config.borderWidth = 2
   config.matchFgColorHex = "#f8c291"
-  config.powerPrefix = "p:"
+  config.powerPrefix = normalizePrefix("p:")
   config.vimMode = false
 
   ## Ensure TOML exists
@@ -731,7 +742,7 @@ type CmdKind = enum
   ckConfig,      # `c:`
   ckSearch,      # `s:` fast file search
   ckPower,       # `p:` system/power actions
-  ckShortcut,    # custom shortcuts (e.g. g:, w:, y:)
+  ckShortcut,    # custom shortcuts (e.g. :g, :wiki)
   ckRun          # raw `r:` command
 
 proc parseCommand(inputText: string): (CmdKind, string, int) =
@@ -746,28 +757,17 @@ proc parseCommand(inputText: string): (CmdKind, string, int) =
       rest = body[sep + 1 .. ^1].strip()
     else:
       rest = ""
-    var norm = keyword.toLowerAscii()
-    if norm.len > 0 and norm[^1] == ':':
-      norm = norm[0 ..< norm.high]
+    let norm = normalizePrefix(keyword)
     case norm
     of "s": return (ckSearch, rest, -1)
     of "c": return (ckConfig, rest, -1)
     of "t": return (ckTheme, rest, -1)
     of "r": return (ckRun, rest, -1)
     else:
-      if config.powerPrefix.len > 0:
-        var power = config.powerPrefix
-        var trimmed = power
-        if trimmed.len > 0 and trimmed[^1] == ':':
-          trimmed = trimmed[0 ..< trimmed.high]
-        if norm == trimmed.toLowerAscii() or norm == power.toLowerAscii():
-          return (ckPower, rest, -1)
+      if config.powerPrefix.len > 0 and norm == config.powerPrefix:
+        return (ckPower, rest, -1)
       for i, sc in shortcuts:
-        var sp = sc.prefix
-        var trimmed = sp
-        if trimmed.len > 0 and trimmed[^1] == ':':
-          trimmed = trimmed[0 ..< trimmed.high]
-        if norm == trimmed.toLowerAscii():
+        if norm == sc.prefix:
           return (ckShortcut, rest, i)
       return (ckNone, inputText, -1)
 
@@ -1113,22 +1113,54 @@ proc syncVimCommand() =
   buildActions()
 
 proc openVimCommand(initial: string = "") =
+  if not vimCommandActive:
+    vimSavedInput = inputText
+    vimSavedSelectedIndex = selectedIndex
+    vimSavedViewOffset = viewOffset
+    vimCommandRestorePending = true
   vimCommandBuffer = initial
   vimCommandActive = true
   vimPendingG = false
   syncVimCommand()
 
-proc closeVimCommand() =
+proc closeVimCommand(restoreInput = false) =
+  let savedInput = vimSavedInput
+  let savedSelected = vimSavedSelectedIndex
+  let savedOffset = vimSavedViewOffset
   vimCommandBuffer.setLen(0)
   vimCommandActive = false
   vimPendingG = false
+
+  if restoreInput and vimCommandRestorePending:
+    inputText = savedInput
+    lastInputChangeMs = gui.nowMs()
+    buildActions()
+
+    if filteredApps.len > 0:
+      let clampedSel = max(0, min(savedSelected, filteredApps.len - 1))
+      let visibleRows = max(1, config.maxVisibleItems)
+      let maxOffset = max(0, filteredApps.len - visibleRows)
+      var newOffset = max(0, min(savedOffset, maxOffset))
+      if clampedSel < newOffset:
+        newOffset = clampedSel
+      elif clampedSel >= newOffset + visibleRows:
+        newOffset = max(0, clampedSel - visibleRows + 1)
+      selectedIndex = clampedSel
+      viewOffset = newOffset
+    else:
+      selectedIndex = 0
+      viewOffset = 0
+
+  vimSavedInput = ""
+  vimSavedSelectedIndex = 0
+  vimSavedViewOffset = 0
+  vimCommandRestorePending = false
 
 
 
 proc executeVimCommand() =
   let trimmed = vimCommandBuffer.strip()
   closeVimCommand()
-  vimPendingG = false
   if trimmed.len == 0:
     return
   if trimmed == ":q":
@@ -1152,7 +1184,7 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
         vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
         syncVimCommand()
       else:
-        closeVimCommand()
+        closeVimCommand(restoreInput = true)
       return true
     of XK_h:
       if (state and ControlMask.cuint) != 0:
@@ -1160,7 +1192,7 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
           vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
           syncVimCommand()
         else:
-          closeVimCommand()
+          closeVimCommand(restoreInput = true)
         return true
     of XK_u:
       if (state and ControlMask.cuint) != 0:
@@ -1168,7 +1200,7 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
         syncVimCommand()
         return true
     of XK_Escape:
-      closeVimCommand()
+      closeVimCommand(restoreInput = true)
       return true
     else:
       if ch != '\0' and ch >= ' ':

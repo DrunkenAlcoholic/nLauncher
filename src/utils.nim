@@ -78,7 +78,7 @@ proc tryStart(candidates: seq[(string, seq[string])]): bool =
   for (exe, args) in candidates:
     if exe.len > 0:
       try:
-        discard startProcess(exe, args = args, options = {poDaemon})
+        discard startProcess(exe, args = args, options = {poDaemon, poParentStreams})
         return true
       except:
         discard
