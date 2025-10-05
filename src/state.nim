@@ -96,6 +96,10 @@ type
     powerMode*: PowerActionMode = pamSpawn
     stayOpen*: bool = false
 
+  ## Lightweight row metadata for rendering the results list.
+  DisplayRow* = object
+    text*: string
+
   ## Theme definition (matchFgColorHex is explicit; no "auto" support).
   Theme* = object
     name*: string
@@ -117,7 +121,7 @@ var
 var
   config*: Config                   ## parsed launcher configuration
   allApps*: seq[DesktopApp]
-  filteredApps*: seq[DesktopApp]    ## full list & current view slice
+  filteredApps*: seq[DisplayRow]    ## full list & current view slice
   inputText*: string                ## raw user input
   selectedIndex*: int               ## index into `filteredApps`
   viewOffset*: int                  ## first visible item row

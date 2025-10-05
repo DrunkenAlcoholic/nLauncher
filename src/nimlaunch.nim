@@ -378,7 +378,8 @@ proc loadApplications() =
            c.flatpakSystemMtime == flatpakSystemM:
           timeIt "Cache hit:":
             allApps = c.apps
-            filteredApps = allApps
+            filteredApps = @[]
+            matchSpans = @[]
           return
       else:
         echo "Cache invalid — rescanning …"
@@ -404,7 +405,8 @@ proc loadApplications() =
 
     allApps = dedup.values.toSeq
     allApps.sort(proc(a, b: DesktopApp): int = cmpIgnoreCase(a.name, b.name))
-    filteredApps = allApps
+    filteredApps = @[]
+    matchSpans = @[]
     try:
       createDir(cacheDir)
       writeFile(cacheFile, pretty(%CacheData(formatVersion: CacheFormatVersion,
@@ -807,11 +809,6 @@ proc updateThemePreview() =
   themePreviewCurrent = name
 
 
-proc visibleQuery(inputText: string): string =
-  ## Return the user's query sans command prefix so highlight works.
-  let (_, rest, _) = parseCommand(inputText)
-  rest
-
 proc substituteQuery(pattern, value: string): string =
   ## Replace `{query}` placeholder or append value if absent.
   if pattern.contains("{query}"):
@@ -844,215 +841,204 @@ proc shortcutExec(sc: Shortcut; query: string): string =
   of smFile:
     result = substituteQuery(sc.base, query)
 
-# ── Build actions & mirror to filteredApps ─────────────────────────────
-proc buildActions() =
-  ## Populate `actions` based on `inputText`; mirror to GUI lists/spans.
-  actions.setLen(0)
+proc buildThemeActions(rest: string; defaultIndex: var int): seq[Action] =
+  ## Build theme selection rows and remember the currently active index.
+  defaultIndex = 0
+  let ql = rest.toLowerAscii
+  let currentThemeLower = config.themeName.toLowerAscii
+  var idx = 0
+  for th in themeList:
+    if ql.len == 0 or th.name.toLowerAscii.contains(ql):
+      result.add Action(kind: akTheme, label: th.name, exec: th.name)
+      if th.name.toLowerAscii == currentThemeLower:
+        defaultIndex = idx
+      inc idx
+  if result.len == 0:
+    result.add Action(kind: akPlaceholder, label: "No matching themes", exec: "")
 
-  let (cmd, rest, shortcutIdx) = parseCommand(inputText)
-  var handled = true
-  var defaultIndex = 0
+proc buildConfigActions(rest: string): seq[Action] =
+  ## Build configuration file results under ~/.config.
+  for entry in scanConfigFiles(rest):
+    result.add Action(kind: akConfig, label: entry.name, exec: entry.exec)
+  if result.len == 0:
+    result.add Action(kind: akPlaceholder, label: "No matches", exec: "")
 
-  case cmd
-  of ckTheme:
-    beginThemePreviewSession()
-    let currentThemeLower = config.themeName.toLowerAscii
-    let ql = rest.toLowerAscii
-    for th in themeList:
-      if ql.len == 0 or th.name.toLowerAscii.contains(ql):
-        let idx = actions.len
-        actions.add Action(kind: akTheme, label: th.name, exec: th.name)
-        if th.name.toLowerAscii == currentThemeLower:
-          defaultIndex = idx
+proc buildShortcutActions(rest: string; shortcutIdx: int): seq[Action] =
+  ## Resolve a configured shortcut against the current query.
+  if shortcutIdx < 0 or shortcutIdx >= shortcuts.len:
+    return @[Action(kind: akPlaceholder, label: "Shortcut not found", exec: "")]
+  let sc = shortcuts[shortcutIdx]
+  @[Action(kind: akShortcut,
+           label: shortcutLabel(sc, rest),
+           exec: shortcutExec(sc, rest),
+           shortcutMode: sc.mode)]
 
-  of ckConfig:
-    for a in scanConfigFiles(rest):
-      actions.add Action(kind: akConfig, label: a.name, exec: a.exec)
+proc buildPowerActions(rest: string): seq[Action] =
+  ## Build power/system actions filtered by label.
+  if powerActions.len == 0:
+    return @[Action(kind: akPlaceholder,
+                    label: "No power actions configured",
+                    exec: "")]
+  let ql = rest.strip().toLowerAscii
+  for pa in powerActions:
+    if ql.len == 0 or pa.label.toLowerAscii.contains(ql):
+      result.add Action(kind: akPower,
+                        label: pa.label,
+                        exec: pa.command,
+                        powerMode: pa.mode,
+                        stayOpen: pa.stayOpen)
+  if result.len == 0:
+    result.add Action(kind: akPlaceholder, label: "No matches", exec: "")
 
-  of ckShortcut:
-    if shortcutIdx >= 0 and shortcutIdx < shortcuts.len:
-      let sc = shortcuts[shortcutIdx]
-      actions.add Action(kind: akShortcut,
-                         label: shortcutLabel(sc, rest),
-                         exec: shortcutExec(sc, rest),
-                         shortcutMode: sc.mode)
+proc buildRunActions(rest: string): seq[Action] =
+  ## Return metadata for :r or ! commands.
+  if rest.len == 0:
+    return @[Action(kind: akPlaceholder, label: "Run: enter a command", exec: "")]
+  @[Action(kind: akRun, label: "Run: " & rest, exec: rest)]
 
-  of ckPower:
-    if powerActions.len == 0:
-      actions.add Action(kind: akPlaceholder,
-                         label: "No power actions configured",
-                         exec: "")
+proc buildSearchActions(rest: string): seq[Action] =
+  ## File search via :s — respects debounce and reuses cached results.
+  let sinceEdit = gui.nowMs() - lastInputChangeMs
+  if rest.len < 2 or sinceEdit < SearchDebounceMs:
+    return @[Action(kind: akPlaceholder, label: "Searching…", exec: "")]
+
+  gui.notifyStatus("Searching…", 1200)
+  let restLower = rest.toLowerAscii
+
+  var paths: seq[string]
+  if lastSearchQuery.len > 0 and rest.len >= lastSearchQuery.len and
+     rest.startsWith(lastSearchQuery) and lastSearchResults.len > 0:
+    for p in lastSearchResults:
+      if p.toLowerAscii.contains(restLower):
+        paths.add p
+  else:
+    paths = scanFilesFast(rest)
+
+  lastSearchQuery = rest
+  lastSearchResults = paths
+
+  let maxScore = min(paths.len, SearchShowCap)
+
+  proc pathDepth(s: string): int =
+    var d = 0
+    for ch in s:
+      if ch == '/': inc d
+    d
+
+  let home = getHomeDir()
+  var top = initHeapQueue[(int, string)]()
+  let limit = config.maxVisibleItems
+  let ql = restLower
+
+  for idx in 0 ..< maxScore:
+    let p = paths[idx]
+    let name = p.extractFilename
+    var s = scoreMatch(rest, name, p, home)
+
+    let nl = name.toLowerAscii
+    if nl == ql: s += 12_000
+    elif nl.startsWith(ql): s += 4_000
+
+    if p.startsWith(home & "/"):
+      s += 800
+      let dir = p[0 ..< max(0, p.len - name.len)]
+      let relDepth = max(0, pathDepth(dir) - pathDepth(home))
+      s -= min(relDepth, 10) * 200
+      if dir == home or dir == (home & "/"):
+        s += 5_000
+        if name.len > 0 and name[0] == '.': s += 4_000
     else:
-      let ql = rest.strip().toLowerAscii
-      var matched = 0
-      for pa in powerActions:
-        if ql.len == 0 or pa.label.toLowerAscii.contains(ql):
-          actions.add Action(kind: akPower,
-                             label: pa.label,
-                             exec: pa.command,
-                             powerMode: pa.mode,
-                             stayOpen: pa.stayOpen)
-          inc matched
-      if matched == 0:
-        actions.add Action(kind: akPlaceholder,
-                           label: "No matches",
-                           exec: "")
+      s -= 2_000
 
-  of ckSearch:
-    ## Debounce heavy file scans while user is typing quickly.
-    let sinceEdit = gui.nowMs() - lastInputChangeMs
-    if rest.len < 2 or sinceEdit < SearchDebounceMs:
-      actions.add Action(kind: akPlaceholder, label: "Searching…", exec: "")
-      handled = true
-    else:
-      gui.notifyStatus("Searching…", 1200)
+    if s > -1_000_000:
+      push(top, (s, p))
+      if top.len > max(limit, 200): discard pop(top)
 
-      let restLower = rest.toLowerAscii
+  var ranked: seq[(int, string)] = @[]
+  while top.len > 0: ranked.add pop(top)
+  ranked.sort(proc(a, b: (int, string)): int = cmp(b[0], a[0]))
 
-      ## Reuse previous scan results if user is narrowing the query (prefix grow).
-      var paths: seq[string]
-      if lastSearchQuery.len > 0 and rest.len >= lastSearchQuery.len and
-         rest.startsWith(lastSearchQuery) and lastSearchResults.len > 0:
-        for p in lastSearchResults:
-          if p.toLowerAscii.contains(restLower):
-            paths.add p
-      else:
-        paths = scanFilesFast(rest)
+  let showCap = max(limit, min(40, SearchShowCap))
+  for i, it in ranked:
+    if i >= showCap: break
+    let p = it[1]
+    let name = p.extractFilename
+    var dir = p[0 ..< max(0, p.len - name.len)]
+    while dir.len > 0 and dir[^1] == '/': dir.setLen(dir.len - 1)
+    let pretty = name & " — " & shortenPath(dir)
+    result.add Action(kind: akFile, label: pretty, exec: p)
 
-      lastSearchQuery = rest
-      lastSearchResults = paths
+  if result.len == 0:
+    result.add Action(kind: akPlaceholder, label: "No matches", exec: "")
 
-      let maxScore = min(paths.len, SearchShowCap)
+proc buildDefaultActions(rest: string; defaultIndex: var int): seq[Action] =
+  ## Default launcher view — MRU when empty, fuzzy search otherwise.
+  defaultIndex = 0
+  if rest.len == 0:
+    var index = initTable[string, DesktopApp](allApps.len * 2)
+    for app in allApps:
+      index[app.name] = app
 
-      proc pathDepth(s: string): int =
-        var d = 0
-        for ch in s:
-          if ch == '/': inc d
-        d
+    var seen = initHashSet[string]()
+    for name in recentApps:
+      if index.hasKey(name):
+        let app = index[name]
+        result.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
+        seen.incl name
 
-      let home = getHomeDir()
-      var top = initHeapQueue[(int, string)]()
-      let limit = config.maxVisibleItems
-      let ql = restLower
-
-      for idx in 0 ..< maxScore:
-        let p = paths[idx]
-        let name = p.extractFilename
-        var s = scoreMatch(rest, name, p, home)
-
-        ## Prefer exact/prefix basename matches heavily
-        let nl = name.toLowerAscii
-        if nl == ql: s += 12_000
-        elif nl.startsWith(ql): s += 4_000
-
-        ## Prefer items under $HOME; penalize outside and very deep paths
-        if p.startsWith(home & "/"):
-          s += 800
-          let dir = p[0 ..< max(0, p.len - name.len)]
-          let relDepth = max(0, pathDepth(dir) - pathDepth(home))
-          s -= min(relDepth, 10) * 200
-          if dir == home or dir == (home & "/"):
-            s += 5_000
-            if name.len > 0 and name[0] == '.': s += 4_000
-        else:
-          s -= 2_000
-
-        if s > -1_000_000:
-          push(top, (s, p))
-          if top.len > max(limit, 200): discard pop(top)
-
-      var ranked: seq[(int, string)] = @[]
-      while top.len > 0: ranked.add pop(top)
-      ranked.sort(proc(a, b: (int, string)): int = cmp(b[0], a[0]))
-
-      let showCap = max(limit, min(40, SearchShowCap))  # draw a fuller slice than visible
-      for i, it in ranked:
-        if i >= showCap: break
-        let p = it[1]
-        let name = p.extractFilename
-        var dir = p[0 ..< max(0, p.len - name.len)]
-        while dir.len > 0 and dir[^1] == '/': dir.setLen(dir.len - 1)
-        let pretty = name & " — " & shortenPath(dir)
-        actions.add Action(kind: akFile, label: pretty, exec: p)
-
-  of ckRun:
-    if rest.len > 0:
-      actions.add Action(kind: akRun, label: "Run: " & rest, exec: rest)
-    else:
-      actions.add Action(kind: akPlaceholder,
-                         label: "Run: enter a command",
-                         exec: "")
-
-  of ckNone:
-    handled = false
-
-  ## Default view — app list (MRU first, then fuzzy)
-  if not handled:
-    if rest.len == 0:
-      var index = initTable[string, DesktopApp](allApps.len * 2)
-      for app in allApps: index[app.name] = app
-
-      var seen = initHashSet[string]()
-      for name in recentApps:
-        if index.hasKey(name):
-          let app = index[name]
-          actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
-          seen.incl name
-
-      for app in allApps:
-        if not seen.contains(app.name):
-          actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
-
-    else:
-      var top = initHeapQueue[(int, int)]()
-      let limit = config.maxVisibleItems
-      for i, app in allApps:
-        let s = scoreMatch(rest, app.name, app.name, "")
-        if s > -1_000_000:
-          push(top, (s + recentBoost(app.name), i))
-          if top.len > limit: discard pop(top)
-      var ranked: seq[(int, int)] = @[]
-      while top.len > 0: ranked.add pop(top)
-      ranked.sort(proc(a, b: (int, int)): int =
-        result = cmp(b[0], a[0])
-        if result == 0: result = cmpIgnoreCase(allApps[a[1]].name, allApps[b[1]].name)
-      )
-      actions.setLen(0)
-      for it in ranked:
-        let app = allApps[it[1]]
-        actions.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
-
-  ## Mirror to filteredApps + highlight spans
-  filteredApps = @[]
-  matchSpans = @[]
-
-  let q = visibleQuery(inputText)
-  for act in actions:
-    filteredApps.add DesktopApp(
-      name: act.label,
-      exec: act.exec,
-      hasIcon: (act.kind == akApp and act.appData.hasIcon)
+    for app in allApps:
+      if not seen.contains(app.name):
+        result.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
+  else:
+    var top = initHeapQueue[(int, int)]()
+    let limit = config.maxVisibleItems
+    for i, app in allApps:
+      let s = scoreMatch(rest, app.name, app.name, "")
+      if s > -1_000_000:
+        push(top, (s + recentBoost(app.name), i))
+        if top.len > limit: discard pop(top)
+    var ranked: seq[(int, int)] = @[]
+    while top.len > 0: ranked.add pop(top)
+    ranked.sort(proc(a, b: (int, int)): int =
+      result = cmp(b[0], a[0])
+      if result == 0: result = cmpIgnoreCase(allApps[a[1]].name, allApps[b[1]].name)
     )
-    if inputText.len == 0 or q.len == 0:
+    for item in ranked:
+      let app = allApps[item[1]]
+      result.add Action(kind: akApp, label: app.name, exec: app.exec, appData: app)
+
+  if result.len == 0:
+    result.add Action(kind: akPlaceholder, label: "No applications found", exec: "")
+
+proc updateDisplayRows(cmd: CmdKind; highlightQuery: string; defaultIndex: int) =
+  ## Sync state.filteredApps/matchSpans and maintain selection/preview state.
+  filteredApps.setLen(0)
+  matchSpans.setLen(0)
+
+  for act in actions:
+    filteredApps.add DisplayRow(text: act.label)
+    if highlightQuery.len == 0:
       matchSpans.add @[]
     else:
       case act.kind
-      of akApp, akConfig, akTheme, akFile, akShortcut, akPower, akPlaceholder:
-        matchSpans.add subseqSpans(q, act.label)
       of akRun:
         const prefix = "Run: "
         let off = if act.label.len >= prefix.len: prefix.len else: 0
         let seg = if off < act.label.len: act.label[off .. ^1] else: ""
         var spansAbs: seq[(int, int)] = @[]
-        for (s, l) in subseqSpans(q, seg): spansAbs.add (off + s, l)
+        for (s, l) in subseqSpans(highlightQuery, seg): spansAbs.add (off + s, l)
         matchSpans.add spansAbs
+      of akPlaceholder:
+        matchSpans.add @[]
+      else:
+        matchSpans.add subseqSpans(highlightQuery, act.label)
 
   if actions.len == 0:
-    if cmd != ckTheme:
+    if cmd == ckTheme:
+      endThemePreviewSession(false)
+    else:
       selectedIndex = 0
       viewOffset = 0
-    elif selectedIndex >= actions.len:
-      selectedIndex = max(0, actions.len - 1)
   else:
     let maxIndex = actions.len - 1
     var clamped = min(defaultIndex, maxIndex)
@@ -1065,12 +1051,52 @@ proc buildActions() =
     else:
       viewOffset = 0
 
-  if cmd == ckTheme:
-    updateThemePreview()
+    if cmd == ckTheme:
+      if actions.len > 0 and actions[selectedIndex].kind == akTheme:
+        updateThemePreview()
+      else:
+        endThemePreviewSession(false)
+    else:
+      endThemePreviewSession(false)
+
+# ── Build actions & mirror to filteredApps ─────────────────────────────
+proc buildActions() =
+  ## Populate `actions` based on `inputText`; mirror to GUI lists/spans.
+  let (cmd, rest, shortcutIdx) = parseCommand(inputText)
+  var defaultIndex = 0
+  var nextActions: seq[Action] = @[]
+
+  case cmd
+  of ckTheme:
+    beginThemePreviewSession()
+    nextActions = buildThemeActions(rest, defaultIndex)
+  of ckConfig:
+    nextActions = buildConfigActions(rest)
+  of ckShortcut:
+    nextActions = buildShortcutActions(rest, shortcutIdx)
+  of ckPower:
+    nextActions = buildPowerActions(rest)
+  of ckSearch:
+    nextActions = buildSearchActions(rest)
+  of ckRun:
+    nextActions = buildRunActions(rest)
   else:
-    endThemePreviewSession(false)
+    discard
+
+  if cmd == ckNone:
+    nextActions = buildDefaultActions(rest, defaultIndex)
+  elif nextActions.len == 0:
+    nextActions.add Action(kind: akPlaceholder, label: "No matches", exec: "")
+
+  actions = nextActions
+  updateDisplayRows(cmd, rest, defaultIndex)
 
 # ── Perform selected action ─────────────────────────────────────────────
+proc clearInput() =
+  inputText.setLen(0)
+  lastInputChangeMs = gui.nowMs()
+  buildActions()
+
 proc performAction(a: Action) =
   var exitAfter = true ## default: exit after action
   case a.kind
@@ -1125,9 +1151,7 @@ proc performAction(a: Action) =
     applyThemeAndColors(config, a.exec, doNotify = false)
     saveLastTheme(getHomeDir() / ".config" / "nimlaunch" / "nimlaunch.toml")
     endThemePreviewSession(true)
-    inputText = ""
-    lastInputChangeMs = gui.nowMs()
-    buildActions()
+    clearInput()
     gui.redrawWindow()
     exitAfter = false
   of akPlaceholder:
@@ -1136,6 +1160,12 @@ proc performAction(a: Action) =
 
 # ── Input/navigation helpers ───────────────────────────────────────────
 proc deleteLastInputChar() =
+  if inputText.len > 0:
+    inputText.setLen(inputText.len - 1)
+    lastInputChangeMs = gui.nowMs()
+    buildActions()
+
+
   if inputText.len > 0:
     inputText.setLen(inputText.len - 1)
     lastInputChangeMs = gui.nowMs()
@@ -1379,9 +1409,7 @@ proc main() =
       if config.vimMode:
         handled = handleVimKey(ks, ch, ev.xkey.state)
       elif (ks == XK_u or ks == XK_U) and ((ev.xkey.state and ControlMask.cuint) != 0):
-        inputText.setLen(0)
-        lastInputChangeMs = gui.nowMs()
-        buildActions()
+        clearInput()
         handled = true
       elif (ks == XK_h or ks == XK_H) and ((ev.xkey.state and ControlMask.cuint) != 0):
         deleteLastInputChar()

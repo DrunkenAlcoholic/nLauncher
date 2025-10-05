@@ -347,9 +347,9 @@ proc redrawWindow*() =
   let finish = min(viewOffset + maxRows, total)
 
   for idx in start ..< finish:
-    let app = filteredApps[idx]
+    let row = filteredApps[idx]
     let selected = (idx == selectedIndex)
-    drawText(app.name, 12, y, matchSpans[idx], selected)
+    drawText(row.text, 12, y, matchSpans[idx], selected)
     y += config.lineHeight.cint
 
   ## Command line (bottom)
