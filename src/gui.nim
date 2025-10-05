@@ -330,13 +330,16 @@ proc redrawWindow*() =
     cuint(config.winMaxHeight)
   )
 
-  let commandActive = config.vimMode and vimCommandBuffer.len > 0
+  let commandActive = config.vimMode and vimCommandActive
 
   var y: cint = font.ascent + 8
-  let promptLine = config.prompt & inputText & (
-      if benchMode: "" else: config.cursor)
-  drawText(promptLine, 12, y)
-  y += config.lineHeight.cint + 6
+  if not config.vimMode:
+    let promptLine = config.prompt & inputText & (
+        if benchMode: "" else: config.cursor)
+    drawText(promptLine, 12, y)
+    y += config.lineHeight.cint + 6
+  else:
+    y += 2
 
   let total = filteredApps.len
   let maxRows = config.maxVisibleItems
@@ -373,14 +376,25 @@ proc redrawWindow*() =
         vimCommandBuffer.len.cint
       )
 
-  ## Theme overlay (top-right)
+  ## Theme overlay / status
   drawThemeOverlay()
   drawStatusOverlay()
 
-  ## Small clock (bottom-right, overlay font)
-  if not commandActive:
-    let nowStr = now().format("HH:mm")
-    let cw = textWidth(nowStr, true)
+  ## Clock placement
+  let nowStr = now().format("HH:mm")
+  let cw = textWidth(nowStr, true)
+  if config.vimMode:
+    let cx = config.winWidth - int(cw) - 2
+    let cy = font.ascent + 6
+    XftDrawStringUtf8(
+      xftDraw,
+      cast[PXftColor](addr xftColorFg),
+      overlayFont,
+      cint(cx), cint(cy),
+      cast[PFcChar8](nowStr[0].addr),
+      nowStr.len.cint
+    )
+  else:
     let cx = config.winWidth - int(cw) - 2
     let cy = config.winMaxHeight - 8
     XftDrawStringUtf8(

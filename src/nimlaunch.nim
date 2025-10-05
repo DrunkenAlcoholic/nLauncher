@@ -72,7 +72,7 @@ when defined(posix):
 
     discard ftruncate(fd, 0)
     discard lseek(fd, 0, 0)
-    let pidStr = $getCurrentProcessId() & '\n'
+    let pidStr = $getCurrentProcessId() & "\n"
     discard write(fd, pidStr.cstring, pidStr.len.cint)
 
     lockFd = fd
@@ -736,16 +736,43 @@ type CmdKind = enum
 
 proc parseCommand(inputText: string): (CmdKind, string, int) =
   ## Parse *inputText* and return the command kind, remainder, and shortcut index.
+  if inputText.len > 0 and inputText[0] == ':':
+    var body = inputText[1 .. ^1]
+    var rest = ""
+    let sep = body.find({' ', '\t'})
+    var keyword = body
+    if sep >= 0:
+      keyword = body[0 ..< sep]
+      rest = body[sep + 1 .. ^1].strip()
+    else:
+      rest = ""
+    var norm = keyword.toLowerAscii()
+    if norm.len > 0 and norm[^1] == ':':
+      norm = norm[0 ..< norm.high]
+    case norm
+    of "s": return (ckSearch, rest, -1)
+    of "c": return (ckConfig, rest, -1)
+    of "t": return (ckTheme, rest, -1)
+    of "r": return (ckRun, rest, -1)
+    else:
+      if config.powerPrefix.len > 0:
+        var power = config.powerPrefix
+        var trimmed = power
+        if trimmed.len > 0 and trimmed[^1] == ':':
+          trimmed = trimmed[0 ..< trimmed.high]
+        if norm == trimmed.toLowerAscii() or norm == power.toLowerAscii():
+          return (ckPower, rest, -1)
+      for i, sc in shortcuts:
+        var sp = sc.prefix
+        var trimmed = sp
+        if trimmed.len > 0 and trimmed[^1] == ':':
+          trimmed = trimmed[0 ..< trimmed.high]
+        if norm == trimmed.toLowerAscii():
+          return (ckShortcut, rest, i)
+      return (ckNone, inputText, -1)
+
   var rest: string
-  if takePrefix(inputText, "c:", rest): return (ckConfig, rest, -1)
-  if takePrefix(inputText, "t:", rest): return (ckTheme, rest, -1)
-  if takePrefix(inputText, "s:", rest): return (ckSearch, rest, -1)
-  if config.powerPrefix.len > 0 and
-     takePrefix(inputText, config.powerPrefix, rest):
-    return (ckPower, rest, -1)
-  for i, sc in shortcuts:
-    if takePrefix(inputText, sc.prefix, rest): return (ckShortcut, rest, i)
-  if takePrefix(inputText, "r:", rest) or takePrefix(inputText, "!", rest):
+  if takePrefix(inputText, "!", rest):
     return (ckRun, rest.strip(), -1)
   (ckNone, inputText, -1)
 
@@ -772,7 +799,7 @@ proc shortcutLabel(sc: Shortcut; query: string): string =
 
   result = sc.label
   let last = sc.label[^1]
-  if last notin {' ', '\t', '\v', '\f', '\r', '\n'}:
+  if not last.isSpaceAscii():
     result.add ' '
   result.add query
 
@@ -1080,101 +1107,125 @@ proc jumpToBottom() =
   let start = filteredApps.len - config.maxVisibleItems
   viewOffset = if start > 0: start else: 0
 
+proc syncVimCommand() =
+  inputText = vimCommandBuffer
+  lastInputChangeMs = gui.nowMs()
+  buildActions()
+
+proc openVimCommand(initial: string = "") =
+  vimCommandBuffer = initial
+  vimCommandActive = true
+  vimPendingG = false
+  syncVimCommand()
+
+proc closeVimCommand() =
+  vimCommandBuffer.setLen(0)
+  vimCommandActive = false
+  vimPendingG = false
+
+
+
+proc executeVimCommand() =
+  let trimmed = vimCommandBuffer.strip()
+  closeVimCommand()
+  vimPendingG = false
+  if trimmed.len == 0:
+    return
+  if trimmed == ":q":
+    shouldExit = true
+    return
+  inputText = trimmed
+  lastInputChangeMs = gui.nowMs()
+  buildActions()
+
 proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
   if not config.vimMode:
     return false
 
-  if vimCommandBuffer.len > 0:
+  if vimCommandActive:
     case ks
     of XK_Return:
-      let cmd = vimCommandBuffer
-      vimCommandBuffer.setLen(0)
-      vimPendingG = false
-      if cmd == ":q":
-        shouldExit = true
-      elif cmd.len > 0 and cmd[0] == '/':
-        let pattern = if cmd.len > 1: cmd[1 .. ^1] else: ""
-        inputText = pattern
-        lastInputChangeMs = gui.nowMs()
-        buildActions()
-        vimInNormalMode = false
+      executeVimCommand()
       return true
-    of XK_BackSpace:
-      if vimCommandBuffer.len > 1:
+    of XK_BackSpace, XK_Delete:
+      if vimCommandBuffer.len > 0:
         vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
+        syncVimCommand()
       else:
-        vimCommandBuffer.setLen(0)
-      return true
-    of XK_Escape:
-      vimCommandBuffer.setLen(0)
-      return true
-    else:
-      if ch != '\0' and ch >= ' ':
-        if vimCommandBuffer == "/" and ch == ':':
-          vimCommandBuffer = ":"
-        else:
-          vimCommandBuffer.add(ch)
-      return true
-
-  if vimInNormalMode:
-    if ks == XK_g or ks == XKc_G:
-      if ks == XKc_G:
-        vimPendingG = false
-        jumpToBottom()
-      elif vimPendingG:
-        vimPendingG = false
-        jumpToTop()
-      else:
-        vimPendingG = true
-      return true
-      
-    case ks
-    of XK_Escape:
-      vimPendingG = false
-      return true
-    of XK_i, XK_a:
-      vimInNormalMode = false
-      vimPendingG = false
-      return true
-    of XK_colon:
-      vimCommandBuffer = ":"
-      vimPendingG = false
-      return true
-    of XK_slash:
-      vimCommandBuffer = "/"
-      vimPendingG = false
-      return true
-    of XK_j:
-      vimPendingG = false
-      moveSelectionBy(1)
-      return true
-    of XK_k:
-      vimPendingG = false
-      moveSelectionBy(-1)
+        closeVimCommand()
       return true
     of XK_h:
-      vimPendingG = false
-      deleteLastInputChar()
-      return true
-    of XK_l:
-      vimPendingG = false
-      activateCurrentSelection()
+      if (state and ControlMask.cuint) != 0:
+        if vimCommandBuffer.len > 0:
+          vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
+          syncVimCommand()
+        else:
+          closeVimCommand()
+        return true
+    of XK_u:
+      if (state and ControlMask.cuint) != 0:
+        vimCommandBuffer.setLen(0)
+        syncVimCommand()
+        return true
+    of XK_Escape:
+      closeVimCommand()
       return true
     else:
       if ch != '\0' and ch >= ' ':
-        vimPendingG = false
-        return true
-      vimPendingG = false
-      return false
+        vimCommandBuffer.add(ch)
+        syncVimCommand()
+      return true
 
-  if ks == XK_Escape:
-    vimInNormalMode = true
-    vimPendingG = false
-    if vimCommandBuffer.len > 0:
-      vimCommandBuffer.setLen(0)
+  case ks
+  of XK_slash:
+    if vimCommandActive:
+      vimCommandBuffer.add('/')
+      syncVimCommand()
+    else:
+      openVimCommand("")
     return true
-
-  return false
+  of XK_colon:
+    openVimCommand(":")
+    return true
+  of XK_exclam:
+    openVimCommand("!")
+    return true
+  of XK_g, XKc_G:
+    let shiftHeld = (ks == XKc_G) or (state and ShiftMask.cuint) != 0 or ch == 'G'
+    if shiftHeld:
+      vimPendingG = false
+      jumpToBottom()
+    elif vimPendingG:
+      vimPendingG = false
+      jumpToTop()
+    else:
+      vimPendingG = true
+    return true
+  of XK_Escape:
+    shouldExit = true
+    return true
+  of XK_j:
+    vimPendingG = false
+    moveSelectionBy(1)
+    return true
+  of XK_k:
+    vimPendingG = false
+    moveSelectionBy(-1)
+    return true
+  of XK_h:
+    vimPendingG = false
+    deleteLastInputChar()
+    return true
+  of XK_l:
+    vimPendingG = false
+    activateCurrentSelection()
+    return true
+  else:
+    if ch != '\0' and ch >= ' ':
+      vimPendingG = false
+      return true
+    vimPendingG = false
+    return false
 
 # ── Main loop ───────────────────────────────────────────────────────────
 proc main() =
@@ -1188,9 +1239,9 @@ proc main() =
   timeIt "Load Recent Apps:": loadRecent()
   timeIt "Build Actions:": buildActions()
 
-  vimInNormalMode = false
   vimPendingG = false
   vimCommandBuffer.setLen(0)
+  vimCommandActive = false
 
   initGui()
 
@@ -1233,6 +1284,14 @@ proc main() =
       var handled = false
       if config.vimMode:
         handled = handleVimKey(ks, ch, ev.xkey.state)
+      elif (ks == XK_u or ks == XK_U) and ((ev.xkey.state and ControlMask.cuint) != 0):
+        inputText.setLen(0)
+        lastInputChangeMs = gui.nowMs()
+        buildActions()
+        handled = true
+      elif (ks == XK_h or ks == XK_H) and ((ev.xkey.state and ControlMask.cuint) != 0):
+        deleteLastInputChar()
+        handled = true
       if not handled:
         case ks
         of XK_Escape:

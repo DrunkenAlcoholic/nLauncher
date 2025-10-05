@@ -77,11 +77,11 @@ type
   ## What kind of thing the user can pick.
   ActionKind* = enum
     akApp,       # a real .desktop application
-    akRun,       # a `/…` shell command
-    akConfig,    # `c:` file under ~/.config
-    akFile,      # `s:` file search (open with default app)
+    akRun,       # a `:r` shell command
+    akConfig,    # `:c` file under ~/.config
+    akFile,      # `:s` file search (open with default app)
     akShortcut,  # configurable shortcut (URL/shell/file)
-    akTheme,     # `t:` Theme selector
+    akTheme,     # `:t` Theme selector
     akPower,     # power/system management entries
     akPlaceholder
 
@@ -130,8 +130,8 @@ var
   shortcuts*: seq[Shortcut]
   powerActions*: seq[PowerAction]
   vimCommandBuffer*: string
-  vimInNormalMode*: bool = false
   vimPendingG*: bool = false
+  vimCommandActive*: bool = false
 
 # ── Constants ───────────────────────────────────────────────────────────
 const
@@ -179,25 +179,25 @@ width = 2                         # Border thickness in pixels (0 = no border)
 # Shortcuts
 # ==========================
 # Define custom prefix triggers. Each shortcut supports:
-#   prefix  = letters ending with ':' (e.g., "g:")
+#   prefix  = letters starting with ':' (e.g., ":g")
 #   label   = text shown before your query in the results list
 #   base    = template containing optional {query} placeholder
 #   mode    = "url" (default), "shell", or "file"
 
 [[shortcuts]]
-prefix = "g:"
+prefix = ":g"
 label  = "Search Google: "
 base   = "https://www.google.com/search?q={query}"
 mode   = "url"
 
 [[shortcuts]]
-prefix = "w:"
+prefix = ":w"
 label  = "Search Wiki: "
 base   = "https://en.wikipedia.org/wiki/Special:Search?search={query}"
 mode   = "url"
 
 [[shortcuts]]
-prefix = "y:"
+prefix = ":y"
 label  = "Search YouTube: "
 base   = "https://www.youtube.com/results?search_query={query}"
 mode   = "url"
@@ -205,7 +205,7 @@ mode   = "url"
 # ==========================
 # Run commands
 # ==========================
-# Use `r:` (or `!`) to execute shell commands directly without a custom shortcut.
+# Use `:r` (or `!`) to execute shell commands directly without a custom shortcut.
 
 # ==========================
 # Power actions
@@ -215,7 +215,7 @@ mode   = "url"
 # your configured terminal). `stay_open = true` keeps the launcher visible.
 
 [power]
-prefix = "p:"
+prefix = ":p"
 
 [[power_actions]]
 label   = "Shutdown"
