@@ -1304,11 +1304,7 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
     return true
   of XK_h:
     vimPendingG = false
-    let (cmd, _, _) = parseCommand(inputText)
-    if cmd == ckTheme and actions.len > 0:
-      moveSelectionBy(-1)
-    else:
-      deleteLastInputChar()
+    deleteLastInputChar()
     return true
   of XK_l:
     vimPendingG = false

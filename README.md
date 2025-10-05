@@ -6,7 +6,7 @@ dependencies.
 
 ---
 
-## Why NimLaunch?
+## Features
 
 - **Instant fuzzy search** – typo-tolerant scoring that favours prefixes, word
   boundaries, and recent launches.
