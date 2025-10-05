@@ -343,14 +343,6 @@ proc saveLastTheme(cfgPath: string) =
   if updated:
     writeFile(cfgPath, lines.join("\n"))
 
-proc cycleTheme*(cfg: var Config) =
-  ## Cycle to the next theme in `themeList` and persist the choice.
-  if themeList.len == 0: return
-  currentThemeIndex = (currentThemeIndex + 1) mod themeList.len
-  let th = themeList[currentThemeIndex]
-  applyThemeAndColors(cfg, th.name)
-  saveLastTheme(getHomeDir() / ".config" / "nimlaunch" / "nimlaunch.toml")
-
 # ── Applications discovery (.desktop) ───────────────────────────────────
 proc newestDesktopMtime(dir: string): int64 =
   ## Return the newest modification time among *.desktop files under *dir*.
@@ -776,6 +768,45 @@ proc parseCommand(inputText: string): (CmdKind, string, int) =
     return (ckRun, rest.strip(), -1)
   (ckNone, inputText, -1)
 
+proc beginThemePreviewSession() =
+  if not themePreviewActive:
+    themePreviewActive = true
+    themePreviewBaseTheme = config.themeName
+    themePreviewCurrent = config.themeName
+
+proc endThemePreviewSession(persist: bool) =
+  if not themePreviewActive:
+    return
+  if persist:
+    themePreviewBaseTheme = config.themeName
+    themePreviewCurrent = config.themeName
+  else:
+    if themePreviewBaseTheme.len > 0 and themePreviewCurrent.len > 0 and
+       themePreviewCurrent != themePreviewBaseTheme:
+      applyThemeAndColors(config, themePreviewBaseTheme)
+      themePreviewCurrent = themePreviewBaseTheme
+  themePreviewActive = false
+
+proc updateThemePreview() =
+  let (cmd, _, _) = parseCommand(inputText)
+  if cmd != ckTheme:
+    return
+  if actions.len == 0:
+    endThemePreviewSession(false)
+    return
+  beginThemePreviewSession()
+  if selectedIndex < 0 or selectedIndex >= actions.len:
+    return
+  let act = actions[selectedIndex]
+  if act.kind != akTheme:
+    return
+  let name = act.exec
+  if themePreviewCurrent == name:
+    return
+  applyThemeAndColors(config, name)
+  themePreviewCurrent = name
+
+
 proc visibleQuery(inputText: string): string =
   ## Return the user's query sans command prefix so highlight works.
   let (_, rest, _) = parseCommand(inputText)
@@ -820,13 +851,19 @@ proc buildActions() =
 
   let (cmd, rest, shortcutIdx) = parseCommand(inputText)
   var handled = true
+  var defaultIndex = 0
 
   case cmd
   of ckTheme:
+    beginThemePreviewSession()
+    let currentThemeLower = config.themeName.toLowerAscii
     let ql = rest.toLowerAscii
     for th in themeList:
       if ql.len == 0 or th.name.toLowerAscii.contains(ql):
+        let idx = actions.len
         actions.add Action(kind: akTheme, label: th.name, exec: th.name)
+        if th.name.toLowerAscii == currentThemeLower:
+          defaultIndex = idx
 
   of ckConfig:
     for a in scanConfigFiles(rest):
@@ -1010,8 +1047,28 @@ proc buildActions() =
         for (s, l) in subseqSpans(q, seg): spansAbs.add (off + s, l)
         matchSpans.add spansAbs
 
-  selectedIndex = 0
-  viewOffset = 0
+  if actions.len == 0:
+    if cmd != ckTheme:
+      selectedIndex = 0
+      viewOffset = 0
+    elif selectedIndex >= actions.len:
+      selectedIndex = max(0, actions.len - 1)
+  else:
+    let maxIndex = actions.len - 1
+    var clamped = min(defaultIndex, maxIndex)
+    if cmd == ckTheme and defaultIndex == 0:
+      clamped = min(selectedIndex, maxIndex)
+    selectedIndex = clamped
+    let visible = max(1, config.maxVisibleItems)
+    if clamped >= visible:
+      viewOffset = clamped - visible + 1
+    else:
+      viewOffset = 0
+
+  if cmd == ckTheme:
+    updateThemePreview()
+  else:
+    endThemePreviewSession(false)
 
 # ── Perform selected action ─────────────────────────────────────────────
 proc performAction(a: Action) =
@@ -1067,6 +1124,7 @@ proc performAction(a: Action) =
     ## Apply and persist, but DO NOT reset selection or exit.
     applyThemeAndColors(config, a.exec)
     saveLastTheme(getHomeDir() / ".config" / "nimlaunch" / "nimlaunch.toml")
+    endThemePreviewSession(true)
     exitAfter = false
   of akPlaceholder:
     exitAfter = false
@@ -1095,17 +1153,20 @@ proc moveSelectionBy(step: int) =
   elif selectedIndex >= viewOffset + config.maxVisibleItems:
     viewOffset = selectedIndex - config.maxVisibleItems + 1
     if viewOffset < 0: viewOffset = 0
+  updateThemePreview()
 
 proc jumpToTop() =
   if filteredApps.len == 0: return
   selectedIndex = 0
   viewOffset = 0
+  updateThemePreview()
 
 proc jumpToBottom() =
   if filteredApps.len == 0: return
   selectedIndex = filteredApps.len - 1
   let start = filteredApps.len - config.maxVisibleItems
   viewOffset = if start > 0: start else: 0
+  updateThemePreview()
 
 proc syncVimCommand() =
   inputText = vimCommandBuffer
@@ -1175,38 +1236,35 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
     return false
 
   if vimCommandActive:
-    case ks
-    of XK_Return:
+    if ks == XK_Return:
       executeVimCommand()
       return true
-    of XK_BackSpace, XK_Delete:
+    if ks == XK_BackSpace or ks == XK_Delete:
       if vimCommandBuffer.len > 0:
         vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
         syncVimCommand()
       else:
         closeVimCommand(restoreInput = true)
       return true
-    of XK_h:
-      if (state and ControlMask.cuint) != 0:
-        if vimCommandBuffer.len > 0:
-          vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
-          syncVimCommand()
-        else:
-          closeVimCommand(restoreInput = true)
-        return true
-    of XK_u:
-      if (state and ControlMask.cuint) != 0:
-        vimCommandBuffer.setLen(0)
+    if ks == XK_h and (state and ControlMask.cuint) != 0:
+      if vimCommandBuffer.len > 0:
+        vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
         syncVimCommand()
-        return true
-    of XK_Escape:
+      else:
+        closeVimCommand(restoreInput = true)
+      return true
+    if ks == XK_u and (state and ControlMask.cuint) != 0:
+      vimCommandBuffer.setLen(0)
+      syncVimCommand()
+      return true
+    if ks == XK_Escape:
       closeVimCommand(restoreInput = true)
       return true
-    else:
-      if ch != '\0' and ch >= ' ':
-        vimCommandBuffer.add(ch)
-        syncVimCommand()
+    if ch != '\0' and ch >= ' ':
+      vimCommandBuffer.add(ch)
+      syncVimCommand()
       return true
+    return true
 
   case ks
   of XK_slash:
@@ -1246,7 +1304,11 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
     return true
   of XK_h:
     vimPendingG = false
-    deleteLastInputChar()
+    let (cmd, _, _) = parseCommand(inputText)
+    if cmd == ckTheme and actions.len > 0:
+      moveSelectionBy(-1)
+    else:
+      deleteLastInputChar()
     return true
   of XK_l:
     vimPendingG = false
@@ -1358,9 +1420,6 @@ proc main() =
         of XK_End:
           jumpToBottom()
 
-        of XK_F5:
-          cycleTheme(config)
-
         else:
           if ch != '\0' and ch >= ' ':
             inputText.add(ch)
@@ -1382,6 +1441,9 @@ proc main() =
         shouldExit = true
     else:
       discard
+
+  if themePreviewActive:
+    endThemePreviewSession(false)
 
   discard XDestroyWindow(display, window)
   discard XCloseDisplay(display)

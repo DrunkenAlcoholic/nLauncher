@@ -15,7 +15,7 @@ dependencies.
 - **Small & native** – no GTK/Qt; just Nim, Xlib, and Xft.
 - **Smart filesystem search** – `:s` uses `fd` when available, falls back to
   `locate`, then a bounded walk under `$HOME`.
-- **Themeable** – 25+ bundled themes, live F5 cycling, and easy TOML tweaks.
+- **Themeable** – 25+ bundled themes with instant `:t` preview and easy TOML tweaks.
 - **Single-instance guard** – second launch exits immediately instead of
   spawning duplicate windows.
 
@@ -62,8 +62,7 @@ Command-line flag:
 | Enter                        | Launch selected item |
 | Esc                          | Close NimLaunch |
 | ↑ / ↓ / PgUp / PgDn / Home / End | Navigate the list |
-| F5                           | Cycle to the next theme |
-| `:t`                         | List themes (press Enter to apply) |
+| `:t`                         | Open theme list (Up/Down previews instantly; Enter saves) |
 | `:s query`                   | Search files (`fd` → `locate` → home walk) |
 | `:c query`                   | Open matching files under `~/.config` |
 | `:r command` or `!command`   | Run shell command in your preferred terminal |
@@ -206,8 +205,8 @@ empty-query view always surfaces the last applications you opened.
 
 ## Themes
 
-- F5 cycles through bundled themes and persists the last pick.
-- `:t` shows a list of theme names; pressing Enter applies one immediately.
+- `:t` shows the theme list; move with Up/Down to preview instantly and press Enter to keep the selection.
+  Leaving `:t` without pressing Enter restores the theme you started with.
 - Add or edit `[[themes]]` blocks in the TOML to create your own colour schemes.
 
 Popular presets include Nord, Catppuccin (all flavours), Ayu, Dracula, Gruvbox,

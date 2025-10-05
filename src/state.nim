@@ -136,6 +136,9 @@ var
   vimSavedSelectedIndex*: int = 0     ## selection to restore if command is cancelled
   vimSavedViewOffset*: int = 0        ## scroll offset to restore alongside selection
   vimCommandRestorePending*: bool = false ## true while original state can still be restored
+  themePreviewActive*: bool = false   ## true while :t list is temporarily previewing themes
+  themePreviewBaseTheme*: string
+  themePreviewCurrent*: string
 
 # ── Constants ───────────────────────────────────────────────────────────
 const
@@ -240,7 +243,7 @@ mode        = "spawn"
 # Themes
 # ==========================
 # Add or remove [[themes]] blocks to customize appearance.
-# The "name" field is what you'll see in the theme selector (t: or F5).
+# The "name" field is what you'll see in the `:t` theme selector.
 # Colors:
 #   bgColorHex          = Window background
 #   fgColorHex          = Normal text color
