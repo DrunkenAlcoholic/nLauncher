@@ -1122,9 +1122,13 @@ proc performAction(a: Action) =
       exitAfter = false
   of akTheme:
     ## Apply and persist, but DO NOT reset selection or exit.
-    applyThemeAndColors(config, a.exec)
+    applyThemeAndColors(config, a.exec, doNotify = false)
     saveLastTheme(getHomeDir() / ".config" / "nimlaunch" / "nimlaunch.toml")
     endThemePreviewSession(true)
+    inputText = ""
+    lastInputChangeMs = gui.nowMs()
+    buildActions()
+    gui.redrawWindow()
     exitAfter = false
   of akPlaceholder:
     exitAfter = false

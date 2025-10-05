@@ -377,15 +377,22 @@ proc redrawWindow*() =
       )
 
   ## Theme overlay / status
-  drawThemeOverlay()
-  drawStatusOverlay()
+  if themePreviewActive:
+    drawThemeOverlay()
+  else:
+    drawStatusOverlay()
 
   ## Clock placement
   let nowStr = now().format("HH:mm")
   let cw = textWidth(nowStr, true)
   if config.vimMode:
-    let cx = config.winWidth - int(cw) - 2
-    let cy = font.ascent + 6
+    let clockMargin = 6
+    let overlayActive = (currentThemeName.len > 0) and ((nowMs() - lastThemeSwitchMs) <= FadeDurationMs)
+    var themeHeight = 0
+    if overlayActive:
+      themeHeight = overlayFont.ascent + overlayFont.descent + clockMargin
+    let cx = config.winWidth - int(cw) - clockMargin
+    let cy = font.ascent + clockMargin + themeHeight
     XftDrawStringUtf8(
       xftDraw,
       cast[PXftColor](addr xftColorFg),
