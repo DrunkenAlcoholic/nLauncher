@@ -134,6 +134,7 @@ var
   shortcuts*: seq[Shortcut]
   powerActions*: seq[PowerAction]
   vimCommandBuffer*: string
+  vimLastSearchBuffer*: string
   vimPendingG*: bool = false
   vimCommandActive*: bool = false
   vimSavedInput*: string              ## original query before opening Vim command line

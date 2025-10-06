@@ -1165,12 +1165,6 @@ proc deleteLastInputChar() =
     lastInputChangeMs = gui.nowMs()
     buildActions()
 
-
-  if inputText.len > 0:
-    inputText.setLen(inputText.len - 1)
-    lastInputChangeMs = gui.nowMs()
-    buildActions()
-
 proc activateCurrentSelection() =
   if selectedIndex in 0..<actions.len:
     performAction(actions[selectedIndex])
@@ -1213,15 +1207,23 @@ proc openVimCommand(initial: string = "") =
     vimSavedSelectedIndex = selectedIndex
     vimSavedViewOffset = viewOffset
     vimCommandRestorePending = true
-  vimCommandBuffer = initial
+  if initial.len == 0 and vimLastSearchBuffer.len > 0:
+    vimCommandBuffer = vimLastSearchBuffer
+  else:
+    vimCommandBuffer = initial
   vimCommandActive = true
   vimPendingG = false
   syncVimCommand()
 
-proc closeVimCommand(restoreInput = false) =
+proc closeVimCommand(restoreInput = false; preserveBuffer = false) =
   let savedInput = vimSavedInput
   let savedSelected = vimSavedSelectedIndex
   let savedOffset = vimSavedViewOffset
+  let savedBuffer = vimCommandBuffer
+  if savedBuffer.len == 0:
+    vimLastSearchBuffer = ""
+  elif preserveBuffer and (savedBuffer[0] != ':' and savedBuffer[0] != '!'):
+    vimLastSearchBuffer = savedBuffer
   vimCommandBuffer.setLen(0)
   vimCommandActive = false
   vimPendingG = false
@@ -1255,7 +1257,7 @@ proc closeVimCommand(restoreInput = false) =
 
 proc executeVimCommand() =
   let trimmed = vimCommandBuffer.strip()
-  closeVimCommand()
+  closeVimCommand(preserveBuffer = false)
   if trimmed.len == 0:
     return
   if trimmed == ":q":
@@ -1264,6 +1266,10 @@ proc executeVimCommand() =
   inputText = trimmed
   lastInputChangeMs = gui.nowMs()
   buildActions()
+  if trimmed.len == 0 or (trimmed[0] != ':' and trimmed[0] != '!'):
+    vimLastSearchBuffer = trimmed
+  if actions.len > 0:
+    activateCurrentSelection()
 
 proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
   if not config.vimMode:
@@ -1278,21 +1284,21 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
         vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
         syncVimCommand()
       else:
-        closeVimCommand(restoreInput = true)
-      return true
+        closeVimCommand(preserveBuffer = false)
+        return true
     if ks == XK_h and (state and ControlMask.cuint) != 0:
       if vimCommandBuffer.len > 0:
         vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
         syncVimCommand()
       else:
-        closeVimCommand(restoreInput = true)
+        closeVimCommand(preserveBuffer = false)
       return true
     if ks == XK_u and (state and ControlMask.cuint) != 0:
       vimCommandBuffer.setLen(0)
       syncVimCommand()
       return true
     if ks == XK_Escape:
-      closeVimCommand(restoreInput = true)
+      closeVimCommand(preserveBuffer = true)
       return true
     if ch != '\0' and ch >= ' ':
       vimCommandBuffer.add(ch)

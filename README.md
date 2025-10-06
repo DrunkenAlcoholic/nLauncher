@@ -4,6 +4,8 @@ Lightning-fast, X11-native application and command launcher written in Nim.
 Pure Xlib/Xft rendering, instant fuzzy search, rich themes, and zero toolkit
 dependencies.
 
+![NimLaunch screenshot](Screenshot.gif)
+
 ---
 
 ## Features
@@ -54,34 +56,55 @@ Command-line flag:
 
 ---
 
-## Everyday Usage
+## Quick Reference
 
-| Key / Pattern                | Action |
-| ---------------------------- | ------ |
-| Type text                    | Fuzzy-search installed applications |
-| Enter                        | Launch selected item |
-| Esc                          | Close NimLaunch |
-| ↑ / ↓ / PgUp / PgDn / Home / End | Navigate the list |
-| `:t`                         | Open theme list (Up/Down previews instantly; Enter saves) |
-| `:s query`                   | Search files (`fd` → `locate` → home walk) |
-| `:c query`                   | Open matching files under `~/.config` |
-| `:r command` or `!command`   | Run shell command in your preferred terminal |
-| `:p` (customisable)          | Show configured power/system actions |
+Every query updates the result list in real time. These shortcuts cover the
+core workflow:
 
-Results from `:s` render as `filename — /path/to/dir` and open with the system
+| Trigger | Context | Effect |
+| ------- | ------- | ------ |
+| Type text | Normal | Fuzzy-search applications; top hit updates instantly |
+| Enter | Normal or command bar | Launch the highlighted entry immediately |
+| Esc | Command bar | Close the bar, keep the narrowed results selected |
+| Esc | Normal | Exit NimLaunch |
+| ↑ / ↓ / PgUp / PgDn / Home / End | Any | Navigate the results list |
+| `/` | Normal | Toggle the command bar (restores previous `/` search) |
+| `:` / `!` | Normal | Open the bar primed for a prefix or `!` command |
+| Ctrl+U | Command bar | Clear the current query |
+| Ctrl+H / Backspace | Command bar | Delete one character (closes the bar when empty) |
+
+### Built-in prefixes
+
+| Prefix | Example | Description |
+| ------ | ------- | ----------- |
+| *none* | `fire` | Regular app search; rankings favour prefixes and recent launches |
+| `:t` | `:t nord` | Browse themes; Up/Down preview, Enter to keep selection |
+| `:s` | `:s notes` | Search files (`fd` → `locate` → bounded `$HOME` walk) |
+| `:c` | `:c sway` | Match files inside `~/.config` and open with the default handler |
+| `:r` | `:r htop` | Run a shell command inside your preferred terminal |
+| `!` | `!htop` | Shorthand for `:r` without the colon |
+| `:p` | `:p lock` | Show configured power/system actions (label filter) |
+
+`:s` results render as `filename — /path/to/dir` and open with the system
 handler. Power actions can either spawn in the background or run inside your
-configured terminal.
+configured terminal depending on their `mode`.
 
 ### Vim mode
 
 Enable by setting `[input].vim_mode = true` in `~/.config/nimlaunch/nimlaunch.toml`.
 Vim mode adds:
 
-- `h/j/k/l`, `gg`, and `Shift+G` navigation.
-- Slash (`/`), colon (`:`), and bang (`!`) open the bottom command line.
-- `:q` exits. `Esc` closes the command line and **restores** your previous query
-  if you cancel.
-- `Ctrl+H` deletes one character; `Ctrl+U` clears the command line.
+| Trigger | Effect |
+| ------- | ------ |
+| `h` / `j` / `k` / `l` | Move cursor left/down/up/right (acts on the result list) |
+| `gg` / `Shift+G` | Jump to top / bottom of the list |
+| `/` | Toggle the command bar; reopening restores the last slash search |
+| `:` / `!` | Open the command bar primed for colon or bang commands |
+| `Enter` | Launch the highlighted entry immediately |
+| `Esc` | Leave command mode but keep the current filtered results |
+| `:q` (then Enter) | Quit NimLaunch from the command bar |
+| `Ctrl+H` | Delete one character (when empty, closes the bar) |
+| `Ctrl+U` | Clear the entire command |
 
 ---
 
