@@ -33,6 +33,35 @@ var
   statusText*: string = ""
   statusUntilMs*: int64 = 0
 
+proc initInputContext() =
+  ## Initialize XIM/XIC so we can receive UTF-8 keyboard input.
+  if not inputContext.isNil:
+    XDestroyIC(inputContext)
+    inputContext = nil
+  if not inputMethod.isNil:
+    discard XCloseIM(inputMethod)
+    inputMethod = nil
+  discard XSetLocaleModifiers("")
+  inputMethod = XOpenIM(display, nil, nil, nil)
+  if inputMethod.isNil:
+    discard XSetLocaleModifiers("@im=local")
+    inputMethod = XOpenIM(display, nil, nil, nil)
+  if inputMethod.isNil:
+    echo "NimLaunch warning: XOpenIM failed; keyboard input limited to ASCII"
+    return
+  let style = XIMPreeditNothing or XIMStatusNothing
+  inputContext = XCreateIC(inputMethod,
+                           XNInputStyle, style.culong,
+                           XNClientWindow, window,
+                           XNFocusWindow, window,
+                           nil)
+  if inputContext.isNil:
+    echo "NimLaunch warning: XCreateIC failed; keyboard input limited to ASCII"
+    discard XCloseIM(inputMethod)
+    inputMethod = nil
+    return
+  XSetICFocus(inputContext)
+
 proc nowMs*(): int64 =
   ## Milliseconds since Unix epoch.
   (epochTime() * 1_000).int64
@@ -271,11 +300,13 @@ proc initGui*() =
       discard XSetInputFocus(display, window, RevertToParent, CurrentTime)
 
     gc = XCreateGC(display, window, 0, nil)
-    xftDraw = XftDrawCreate(
-      display, window,
-      DefaultVisual(display, screen),
-      DefaultColormap(display, screen)
-    )
+  xftDraw = XftDrawCreate(
+    display, window,
+    DefaultVisual(display, screen),
+    DefaultColormap(display, screen)
+  )
+
+  initInputContext()
 
 # ── Drawing routines ────────────────────────────────────────────────────
 proc drawText*(txt: string; x, y: cint; spans: seq[(int, int)] = @[];

@@ -217,7 +217,10 @@ proc scanFilesFast*(query: string): seq[string] =
     if fdExe.len > 0:
       let args = @[
         "-i", "--type", "f", "--absolute-path",
-        "--max-results", $limit, query, home
+        "--color", "never",
+        "--max-results", $limit,
+        "--fixed-strings",
+        query, home
       ]
       let p = startProcess(fdExe, args = args, options = {poUsePath, poStdErrToStdOut})
       defer: close(p)
@@ -345,12 +348,13 @@ proc saveLastTheme(cfgPath: string) =
 
 # ── Applications discovery (.desktop) ───────────────────────────────────
 proc newestDesktopMtime(dir: string): int64 =
-  ## Return the newest modification time among *.desktop files under *dir*.
+  ## Return newest mtime among *.desktop files under *dir* (recursive).
   if not dirExists(dir): return 0
   var newest = 0'i64
-  for path in walkFiles(dir / "*.desktop"):
-    let m = times.toUnix(getLastModificationTime(path))
-    if m > newest: newest = m
+  for entry in walkDirRec(dir, yieldFilter = {pcFile}):
+    if entry.endsWith(".desktop"):
+      let m = times.toUnix(getLastModificationTime(entry))
+      if m > newest: newest = m
   newest
 
 proc loadApplications() =
@@ -390,7 +394,8 @@ proc loadApplications() =
     var dedup = initTable[string, DesktopApp]()
     for dir in @[flatpakUserDir, locDir, usrDir, flatpakSystemDir]:
       if not dirExists(dir): continue
-      for path in walkFiles(dir / "*.desktop"):
+      for path in walkDirRec(dir, yieldFilter = {pcFile}):
+        if not path.endsWith(".desktop"): continue
         let opt = parseDesktopFile(path)
         if isSome(opt):
           let app = get(opt)
@@ -610,6 +615,10 @@ proc initLauncherConfig() =
   applyTheme(config, chosen)
   if chosen != lastName:
     saveLastTheme(cfgPath)
+
+  ## guard rails for config values that affect layout/search limits
+  if config.maxVisibleItems < 1:
+    config.maxVisibleItems = 1
 
   ## derived geometry
   config.winMaxHeight = 40 + config.maxVisibleItems * config.lineHeight
@@ -1271,7 +1280,7 @@ proc executeVimCommand() =
   if actions.len > 0:
     activateCurrentSelection()
 
-proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
+proc handleVimKey(ks: KeySym; text: string; ch: char; state: cuint): bool =
   if not config.vimMode:
     return false
 
@@ -1284,24 +1293,24 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
         vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
         syncVimCommand()
       else:
-        closeVimCommand(preserveBuffer = false)
+        closeVimCommand(restoreInput = true, preserveBuffer = false)
         return true
     if ks == XK_h and (state and ControlMask.cuint) != 0:
       if vimCommandBuffer.len > 0:
         vimCommandBuffer.setLen(vimCommandBuffer.len - 1)
         syncVimCommand()
       else:
-        closeVimCommand(preserveBuffer = false)
+        closeVimCommand(restoreInput = true, preserveBuffer = false)
       return true
     if ks == XK_u and (state and ControlMask.cuint) != 0:
       vimCommandBuffer.setLen(0)
       syncVimCommand()
       return true
     if ks == XK_Escape:
-      closeVimCommand(preserveBuffer = true)
+      closeVimCommand(restoreInput = true, preserveBuffer = true)
       return true
-    if ch != '\0' and ch >= ' ':
-      vimCommandBuffer.add(ch)
+    if text.len > 0:
+      vimCommandBuffer.add(text)
       syncVimCommand()
       return true
     return true
@@ -1351,7 +1360,7 @@ proc handleVimKey(ks: KeySym; ch: char; state: cuint): bool =
     activateCurrentSelection()
     return true
   else:
-    if ch != '\0' and ch >= ' ':
+    if text.len > 0:
       vimPendingG = false
       return true
     vimPendingG = false
@@ -1406,14 +1415,42 @@ proc main() =
     of Expose:
       gui.redrawWindow()
     of KeyPress:
-      var buf: array[40, char]
       var ks: KeySym
-      discard XLookupString(ev.xkey.addr, cast[cstring](buf[0].addr), buf.len.cint,
-                            ks.addr, nil)
-      let ch = buf[0]
+      var text = ""
+      var ch: char = '\0'
+      if not inputContext.isNil:
+        var utfBuf: array[64, char]
+        var status: Status = 0
+        let cap = (utfBuf.len - 1).cint
+        let count = Xutf8LookupString(inputContext, ev.xkey.addr,
+                                      cast[cstring](utfBuf[0].addr), cap,
+                                      ks.addr, addr status)
+        if status == XBufferOverflow and count > 0:
+          let needed = count.int
+          var tmp = newString(needed)
+          let actual = Xutf8LookupString(
+            inputContext, ev.xkey.addr,
+            cast[cstring](tmp.cstring), count,
+            ks.addr, addr status)
+          tmp.setLen(actual.int)
+          text = tmp
+        elif count > 0:
+          let termIdx = min(count.int, utfBuf.len - 1)
+          utfBuf[termIdx] = '\0'
+          text = $cast[cstring](utfBuf[0].addr)
+      else:
+        var buf: array[64, char]
+        let count = XLookupString(ev.xkey.addr, cast[cstring](buf[0].addr),
+                                  (buf.len - 1).cint, ks.addr, nil)
+        if count > 0:
+          let termIdx = min(count.int, buf.len - 1)
+          buf[termIdx] = '\0'
+          text = $cast[cstring](buf[0].addr)
+      if text.len > 0:
+        ch = text[0]
       var handled = false
       if config.vimMode:
-        handled = handleVimKey(ks, ch, ev.xkey.state)
+        handled = handleVimKey(ks, text, ch, ev.xkey.state)
       elif (ks == XK_u or ks == XK_U) and ((ev.xkey.state and ControlMask.cuint) != 0):
         clearInput()
         handled = true
@@ -1455,8 +1492,8 @@ proc main() =
           jumpToBottom()
 
         else:
-          if ch != '\0' and ch >= ' ':
-            inputText.add(ch)
+          if text.len > 0:
+            inputText.add(text)
             lastInputChangeMs = gui.nowMs()
             buildActions()
 
@@ -1478,6 +1515,13 @@ proc main() =
 
   if themePreviewActive:
     endThemePreviewSession(false)
+
+  if not inputContext.isNil:
+    XDestroyIC(inputContext)
+    inputContext = nil
+  if not inputMethod.isNil:
+    discard XCloseIM(inputMethod)
+    inputMethod = nil
 
   discard XDestroyWindow(display, window)
   discard XCloseDisplay(display)

@@ -206,6 +206,7 @@ proc parseDesktopFile*(path: string): Option[DesktopApp] =
   let categories = kv.getOrDefault("Categories", "")
   let icon = kv.getOrDefault("Icon", "")
   let noDisplay = kv.getOrDefault("NoDisplay", "false").toLowerAscii() == "true"
+  let hidden = kv.getOrDefault("Hidden", "false").toLowerAscii() == "true"
   let terminalApp = kv.getOrDefault("Terminal", "false").toLowerAscii() == "true"
 
   ## Category filter: exclude Settings/System (exact tokens, case-insensitive)
@@ -219,7 +220,7 @@ proc parseDesktopFile*(path: string): Option[DesktopApp] =
 
   let launchable =
     name.len > 0 and exec.len > 0 and
-    not noDisplay and not terminalApp and not catHit
+    not noDisplay and not hidden and not terminalApp and not catHit
 
   if launchable:
     some(DesktopApp(name: name, exec: exec, hasIcon: icon.len > 0))

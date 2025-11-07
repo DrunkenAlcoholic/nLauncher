@@ -116,6 +116,8 @@ var
   window*: Window
   gc*: GC
   screen*: cint
+  inputMethod*: XIM
+  inputContext*: XIC
 
 # ── Runtime state ───────────────────────────────────────────────────────
 var
