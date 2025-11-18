@@ -22,6 +22,8 @@ var
   lastSearchQuery = ""         ## cache key for s: queries
   lastSearchResults: seq[string] = @[] ## cached paths for narrowing queries
   baseMatchFgColorHex = ""     ## default fallback for match highlight colour
+  configFilesLoaded = false
+  configFilesCache: seq[DesktopApp] = @[]
 
 const
   SearchDebounceMs = 240     # debounce for s: while typing (unified)
@@ -251,21 +253,26 @@ proc scanFilesFast*(query: string): seq[string] =
   except CatchableError as e:
     echo "scanFilesFast warning: ", e.name, ": ", e.msg
 
-proc scanConfigFiles*(query: string): seq[DesktopApp] =
-  ## Return entries from ~/.config matching `query` (case-insensitive).
+proc refreshConfigFiles() =
+  ## Build the cached ~/.config file list once per run.
+  configFilesCache.setLen(0)
   let base = getHomeDir() / ".config"
-  let ql   = query.toLowerAscii
   try:
     for path in walkDirRec(base, yieldFilter = {pcFile}):
       let fn = path.extractFilename
-      if fn.len > 0 and fn.toLowerAscii.contains(ql):
-        result.add DesktopApp(
-          name: fn,
-          exec: "xdg-open " & shellQuote(path),
-          hasIcon: false
-        )
+      if fn.len == 0: continue
+      configFilesCache.add DesktopApp(
+        name: fn,
+        exec: "xdg-open " & shellQuote(path),
+        hasIcon: false
+      )
   except OSError:
     discard
+  configFilesLoaded = true
+
+proc ensureConfigFiles() =
+  if not configFilesLoaded:
+    refreshConfigFiles()
 
 # ── Prefix helpers ─────────────────────────────────────────────────────
 proc normalizePrefix(prefix: string): string =
@@ -867,8 +874,11 @@ proc buildThemeActions(rest: string; defaultIndex: var int): seq[Action] =
 
 proc buildConfigActions(rest: string): seq[Action] =
   ## Build configuration file results under ~/.config.
-  for entry in scanConfigFiles(rest):
-    result.add Action(kind: akConfig, label: entry.name, exec: entry.exec)
+  ensureConfigFiles()
+  let ql = rest.toLowerAscii
+  for entry in configFilesCache:
+    if ql.len == 0 or entry.name.toLowerAscii.contains(ql):
+      result.add Action(kind: akConfig, label: entry.name, exec: entry.exec)
   if result.len == 0:
     result.add Action(kind: akPlaceholder, label: "No matches", exec: "")
 
